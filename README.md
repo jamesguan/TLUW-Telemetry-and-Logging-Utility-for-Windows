@@ -16,14 +16,14 @@ src/
   bin/cli.rs
   bin/gui.rs
 wix/main.wxs                  MSI definition (cargo-wix)
-.github/workflows/release.yml  Merge to main → build MSI → GitHub Release
+.github/workflows/release.yml  Merge to main → semver bump → MSI → GitHub Release
 ```
 
 ---
 
 ## Install (end users)
 
-1. Download the `.msi` from [GitHub Releases](https://github.com/jamesguan/disable-windows-diagnostics/releases).
+1. Download the `.msi` from [GitHub Releases](https://github.com/jamesguan/TLUW-Telemetry-and-Logging-Utility-for-Windows/releases).
 2. Run the installer (Administrator).
 3. On the feature page you can enable:
    - **Desktop shortcut** (on by default)
@@ -147,28 +147,26 @@ schtasks /Query /TN TelemetryLoggingUtilityPostUpdate
 
 ## GitHub Releases (automatic)
 
-Every **push/merge to `main`** runs `.github/workflows/release.yml`, builds the MSI + binaries, and publishes a GitHub Release.
+Every **merge to `main`** runs `.github/workflows/release.yml`, which:
 
-- Tag format: `v{Cargo.toml version}-build.{run_number}` (unique each merge)
-- Also still works for manual `v*` tags and **Actions → Release → Run workflow**
-
-```powershell
-# Typical flow: merge PR / push to main — release is created by CI
-git checkout main
-git merge james
-git push origin main
-```
-
-Optional manual tag release:
+1. Bumps the semver in `Cargo.toml` from [Conventional Commits](https://www.conventionalcommits.org/) since the last `v*` tag  
+   - `feat:` → **minor** · `fix:` / other → **patch** · `BREAKING CHANGE` / `!:` → **major**
+2. Builds the MSI + `tluw.exe` / `tluw-gui.exe`
+3. Commits `chore(release): vX.Y.Z`, tags it, and publishes a GitHub Release
 
 ```powershell
-git tag v0.3.1
-git push origin v0.3.1
+# Typical flow
+git checkout -b feat/my-change
+# … commit with a conventional message, e.g. "feat: …" or "fix: …"
+git push -u origin HEAD
+# Open a PR → merge to main → release is created by CI
 ```
 
-Workflow: `.github/workflows/release.yml`
+Manual bump (Actions → **Release** → **Run workflow**): choose `patch` / `minor` / `major` / `auto`.
 
-Repo: https://github.com/jamesguan/disable-windows-diagnostics
+First release after this setup: if `Cargo.toml` is ahead of the latest `v*` tag (e.g. bumped to **1.0.0** while `v0.3.0` exists), CI ships that version as a catch-up. Later merges bump from the new tag.
+
+Repo: https://github.com/jamesguan/TLUW-Telemetry-and-Logging-Utility-for-Windows
 
 ---
 

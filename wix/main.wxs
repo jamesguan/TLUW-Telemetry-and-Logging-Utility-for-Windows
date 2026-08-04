@@ -38,7 +38,7 @@
 
         <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
         <Property Id='DiskPrompt' Value='Telemetry and Logging Utility for Windows Installation'/>
-        <Property Id='ARPHELPLINK' Value='https://github.com/jamesguan/disable-windows-diagnostics'/>
+        <Property Id='ARPHELPLINK' Value='https://github.com/jamesguan/TLUW-Telemetry-and-Logging-Utility-for-Windows'/>
         <Property Id='WIXUI_INSTALLDIR' Value='APPLICATIONFOLDER'/>
         <Property Id='ARPPRODUCTICON' Value='AppIcon'/>
         <Icon Id='AppIcon' SourceFile='assets\tluw-icon.ico'/>
