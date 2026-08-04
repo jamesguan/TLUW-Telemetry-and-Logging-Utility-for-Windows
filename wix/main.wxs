@@ -1,0 +1,248 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<!--
+  Windows Diagnostics MSI (cargo-wix).
+  Variables set by `cargo wix`: Version, CargoTargetBinDir, …
+-->
+<?if $(sys.BUILDARCH) = x64 or $(sys.BUILDARCH) = arm64 ?>
+    <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
+<?else ?>
+    <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
+<?endif ?>
+
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+
+    <Product
+        Id='*'
+        Name='Windows Diagnostics'
+        UpgradeCode='A0109DC4-1566-4A65-B03D-C011939B154D'
+        Manufacturer='James Guan'
+        Language='1033'
+        Codepage='1252'
+        Version='$(var.Version)'>
+
+        <Package Id='*'
+            Keywords='Installer'
+            Description='Disable and verify Windows diagnostic data / telemetry (CLI + GUI)'
+            Manufacturer='James Guan'
+            InstallerVersion='450'
+            Languages='1033'
+            Compressed='yes'
+            InstallScope='perMachine'
+            SummaryCodepage='1252'
+            />
+
+        <MajorUpgrade
+            Schedule='afterInstallInitialize'
+            DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
+
+        <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
+        <Property Id='DiskPrompt' Value='Windows Diagnostics Installation'/>
+        <Property Id='ARPHELPLINK' Value='https://github.com/jamesguan/disable-windows-diagnostics'/>
+        <Property Id='WIXUI_INSTALLDIR' Value='APPLICATIONFOLDER'/>
+
+        <Directory Id='TARGETDIR' Name='SourceDir'>
+            <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
+                <Directory Id='APPLICATIONFOLDER' Name='Windows Diagnostics'>
+                    <Directory Id='Bin' Name='bin'>
+                        <Component Id='Path' Guid='71FAFF07-88DE-497F-8B29-E939BD3BFB89' KeyPath='yes'>
+                            <Environment
+                                Id='PATH'
+                                Name='PATH'
+                                Value='[Bin]'
+                                Permanent='no'
+                                Part='last'
+                                Action='set'
+                                System='yes'/>
+                        </Component>
+                        <Component Id='binary0' Guid='*'>
+                            <File
+                                Id='exe0'
+                                Name='windows-diagnostics.exe'
+                                DiskId='1'
+                                Source='$(var.CargoTargetBinDir)\windows-diagnostics.exe'
+                                KeyPath='yes'/>
+                        </Component>
+                        <Component Id='binary1' Guid='*'>
+                            <File
+                                Id='exe1'
+                                Name='windows-diagnostics-gui.exe'
+                                DiskId='1'
+                                Source='$(var.CargoTargetBinDir)\windows-diagnostics-gui.exe'
+                                KeyPath='yes'/>
+                        </Component>
+                    </Directory>
+                </Directory>
+            </Directory>
+
+            <Directory Id='ProgramMenuFolder'>
+                <Directory Id='ApplicationProgramsFolder' Name='Windows Diagnostics'/>
+            </Directory>
+
+            <Directory Id='DesktopFolder' Name='Desktop'/>
+            <Directory Id='StartupFolder' Name='Startup'/>
+        </Directory>
+
+        <!-- Start Menu shortcut -->
+        <DirectoryRef Id='ApplicationProgramsFolder'>
+            <Component Id='StartMenuShortcut' Guid='A1B2C3D4-E5F6-7890-ABCD-EF1234567890'>
+                <Shortcut
+                    Id='StartMenuGuiShortcut'
+                    Name='Windows Diagnostics'
+                    Description='Toggle and verify Windows diagnostic data'
+                    Target='[Bin]windows-diagnostics-gui.exe'
+                    WorkingDirectory='Bin'/>
+                <RemoveFolder Id='RemoveApplicationProgramsFolder' On='uninstall'/>
+                <RegistryValue
+                    Root='HKCU'
+                    Key='Software\WindowsDiagnostics'
+                    Name='StartMenuShortcut'
+                    Type='integer'
+                    Value='1'
+                    KeyPath='yes'/>
+            </Component>
+        </DirectoryRef>
+
+        <!-- Desktop shortcut (default ON) -->
+        <DirectoryRef Id='DesktopFolder'>
+            <Component Id='DesktopShortcut' Guid='B2E4C8A1-9F3D-4E6B-8A1C-2D5F7E9B0C4A'>
+                <Shortcut
+                    Id='DesktopGuiShortcut'
+                    Name='Windows Diagnostics'
+                    Description='Toggle and verify Windows diagnostic data'
+                    Target='[Bin]windows-diagnostics-gui.exe'
+                    WorkingDirectory='Bin'/>
+                <RegistryValue
+                    Root='HKCU'
+                    Key='Software\WindowsDiagnostics'
+                    Name='DesktopShortcut'
+                    Type='integer'
+                    Value='1'
+                    KeyPath='yes'/>
+            </Component>
+        </DirectoryRef>
+
+        <!-- Run at Windows start (optional, default OFF) -->
+        <DirectoryRef Id='StartupFolder'>
+            <Component Id='StartupShortcut' Guid='C3F5D9B2-0A4E-5F7C-9B2D-3E6A8F0C1D5B'>
+                <Shortcut
+                    Id='StartupGuiShortcut'
+                    Name='Windows Diagnostics'
+                    Description='Start Windows Diagnostics at logon'
+                    Target='[Bin]windows-diagnostics-gui.exe'
+                    WorkingDirectory='Bin'/>
+                <RegistryValue
+                    Root='HKCU'
+                    Key='Software\WindowsDiagnostics'
+                    Name='StartupShortcut'
+                    Type='integer'
+                    Value='1'
+                    KeyPath='yes'/>
+            </Component>
+        </DirectoryRef>
+
+        <!-- Marker component so the PostUpdate feature can be selected; task created by custom action -->
+        <DirectoryRef Id='APPLICATIONFOLDER'>
+            <Component Id='PostUpdateMarker' Guid='D4A6E0C3-1B5F-6A8D-0C3E-4F7B9A1D2E6C'>
+                <RegistryValue
+                    Root='HKLM'
+                    Key='Software\WindowsDiagnostics'
+                    Name='PostUpdateEnabled'
+                    Type='integer'
+                    Value='1'
+                    KeyPath='yes'/>
+            </Component>
+            <Component Id='CleanupOnUninstall' Guid='E5B7F1D4-2C6A-7B9E-1D4F-5A8C0B2E3F7D'>
+                <RegistryValue
+                    Root='HKLM'
+                    Key='Software\WindowsDiagnostics'
+                    Name='Installed'
+                    Type='integer'
+                    Value='1'
+                    KeyPath='yes'/>
+            </Component>
+        </DirectoryRef>
+
+        <Feature
+            Id='Binaries'
+            Title='Application'
+            Description='CLI + GUI binaries'
+            Level='1'
+            ConfigurableDirectory='APPLICATIONFOLDER'
+            AllowAdvertise='no'
+            Display='expand'
+            Absent='disallow'>
+            <ComponentRef Id='binary0'/>
+            <ComponentRef Id='binary1'/>
+            <ComponentRef Id='CleanupOnUninstall'/>
+            <ComponentRef Id='StartMenuShortcut'/>
+            <Feature
+                Id='Environment'
+                Title='Add to PATH'
+                Description='Add the install bin folder to the system PATH.'
+                Level='1'
+                Absent='allow'>
+                <ComponentRef Id='Path'/>
+            </Feature>
+            <Feature
+                Id='DesktopIcon'
+                Title='Desktop shortcut'
+                Description='Create a Windows Diagnostics shortcut on the Desktop.'
+                Level='1'
+                Absent='allow'>
+                <ComponentRef Id='DesktopShortcut'/>
+            </Feature>
+            <Feature
+                Id='RunAtStartup'
+                Title='Run when Windows starts'
+                Description='Launch the GUI at user logon (Startup folder shortcut).'
+                Level='1000'
+                Absent='allow'>
+                <ComponentRef Id='StartupShortcut'/>
+            </Feature>
+            <Feature
+                Id='PostUpdate'
+                Title='Re-apply after Windows Update'
+                Description='Create a scheduled task that runs lockdown after successful Windows Updates (Event ID 19) and at logon as a backup.'
+                Level='1000'
+                Absent='allow'>
+                <ComponentRef Id='PostUpdateMarker'/>
+            </Feature>
+        </Feature>
+
+        <!-- Create / remove post-update scheduled task -->
+        <CustomAction
+            Id='CA_EnablePostUpdate'
+            FileKey='exe0'
+            ExeCommand='post-update on --no-elevate'
+            Execute='deferred'
+            Impersonate='no'
+            Return='ignore'/>
+        <CustomAction
+            Id='CA_DisablePostUpdate'
+            FileKey='exe0'
+            ExeCommand='post-update off --no-elevate'
+            Execute='deferred'
+            Impersonate='no'
+            Return='ignore'/>
+
+        <InstallExecuteSequence>
+            <!-- Feature state 3 = install locally -->
+            <Custom Action='CA_EnablePostUpdate' After='InstallFiles'>
+                NOT Installed AND (&amp;PostUpdate = 3)
+            </Custom>
+            <!-- On uninstall, remove scheduled task while files still present -->
+            <Custom Action='CA_DisablePostUpdate' Before='RemoveFiles'>
+                (REMOVE="ALL") AND (NOT UPGRADINGPRODUCTCODE)
+            </Custom>
+        </InstallExecuteSequence>
+
+        <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
+
+        <UI>
+            <UIRef Id='WixUI_FeatureTree'/>
+            <Publish Dialog='WelcomeDlg' Control='Next' Event='NewDialog' Value='CustomizeDlg' Order='99'>1</Publish>
+            <Publish Dialog='CustomizeDlg' Control='Back' Event='NewDialog' Value='WelcomeDlg' Order='99'>1</Publish>
+        </UI>
+
+    </Product>
+</Wix>

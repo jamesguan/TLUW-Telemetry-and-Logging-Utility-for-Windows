@@ -7,6 +7,7 @@
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use windows_diagnostics::maintenance;
 use windows_diagnostics::telemetry::{
     self, apply, apply_all, ensure_elevated, read_all, read_one, SettingId,
 };
@@ -54,6 +55,20 @@ enum Commands {
         /// Setting id (see `list`)
         setting: String,
         /// on = collecting allowed, off = blocked
+        state: OnOff,
+    },
+
+    /// Show startup / post-update integration status
+    Integration,
+
+    /// Enable or disable run-at-startup (GUI at logon)
+    Startup {
+        state: OnOff,
+    },
+
+    /// Enable or disable re-apply after Windows Update (scheduled task)
+    #[command(name = "post-update")]
+    PostUpdate {
         state: OnOff,
     },
 }
@@ -105,6 +120,39 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
             match apply(id, state.active()) {
                 Ok(msg) => {
                     println!("{}: {msg}", id.cli_name());
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::Integration => {
+            let s = maintenance::read_integration();
+            println!(
+                "run-at-startup: {}",
+                if s.run_at_startup { "ON" } else { "OFF" }
+            );
+            println!(
+                "post-update:    {}  (task: {})",
+                if s.post_update { "ON" } else { "OFF" },
+                maintenance::TASK_NAME
+            );
+            Ok(())
+        }
+        Commands::Startup { state } => {
+            // HKCU Run does not need admin
+            match maintenance::set_run_at_startup(state.active()) {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::PostUpdate { state } => {
+            require_admin(no_elevate)?;
+            match maintenance::set_post_update_task(state.active()) {
+                Ok(msg) => {
+                    println!("{msg}");
                     Ok(())
                 }
                 Err(e) => Err(e),

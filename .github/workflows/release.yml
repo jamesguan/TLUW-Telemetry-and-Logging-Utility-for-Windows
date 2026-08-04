@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to build (e.g. v0.3.0). Leave empty to use cargo version."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  windows-msi:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix --locked
+
+      - name: Download WiX Toolset binaries
+        shell: pwsh
+        run: |
+          $tools = Join-Path $pwd "tools\wix"
+          New-Item -ItemType Directory -Force -Path $tools | Out-Null
+          $zip = Join-Path $env:TEMP "wix314-binaries.zip"
+          Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $tools -Force
+          $root = Join-Path $pwd "tools\wix-root"
+          New-Item -ItemType Directory -Force -Path (Join-Path $root "bin") | Out-Null
+          Copy-Item (Join-Path $tools "*") (Join-Path $root "bin") -Force
+          Add-Content -Path $env:GITHUB_PATH -Value $tools
+          Add-Content -Path $env:GITHUB_ENV -Value "WIX=$root"
+
+      - name: Build release + MSI
+        shell: pwsh
+        run: |
+          $env:WIX = Join-Path $pwd "tools\wix-root"
+          $env:PATH = "$(Join-Path $pwd 'tools\wix');$env:PATH"
+          cargo build --release --features "cli,gui"
+          cargo wix --no-build --bin-path (Join-Path $pwd "tools\wix")
+
+      - name: Locate MSI
+        id: msi
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem target/wix -Filter *.msi | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $msi) { throw "MSI not found under target/wix" }
+          "path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
+          "name=$($msi.Name)" >> $env:GITHUB_OUTPUT
+          Get-Item $msi.FullName | Format-List FullName, Length
+
+      - name: Resolve tag name
+        id: tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            "name=$env:GITHUB_REF_NAME" >> $env:GITHUB_OUTPUT
+          } elseif ("${{ github.event.inputs.tag }}" -ne "") {
+            "name=${{ github.event.inputs.tag }}" >> $env:GITHUB_OUTPUT
+          } else {
+            $ver = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+            "name=v$ver" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Windows Diagnostics ${{ steps.tag.outputs.name }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.msi.outputs.path }}
+            target/release/windows-diagnostics.exe
+            target/release/windows-diagnostics-gui.exe
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

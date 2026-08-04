@@ -1,5 +1,6 @@
 //! Optional egui front-end. Enabled with the `gui` feature.
 
+use crate::maintenance::{self, IntegrationState};
 use crate::telemetry::{self, SettingId, SettingState};
 use eframe::egui::{self, Color32, RichText, Sense, Ui};
 
@@ -13,6 +14,7 @@ pub struct DiagnosticsApp {
     /// When true, show the live verification table of raw values.
     show_verify: bool,
     verify_stamp: String,
+    integration: IntegrationState,
 }
 
 enum Pending {
@@ -20,6 +22,8 @@ enum Pending {
     All { active: bool },
     /// Re-read system values and open the verify panel.
     Verify,
+    SetStartup(bool),
+    SetPostUpdate(bool),
 }
 
 impl Default for DiagnosticsApp {
@@ -41,6 +45,7 @@ impl Default for DiagnosticsApp {
             pending: None,
             show_verify: false,
             verify_stamp: String::new(),
+            integration: maintenance::read_integration(),
         }
     }
 }
@@ -163,6 +168,9 @@ impl eframe::App for DiagnosticsApp {
 
             ui.add_space(8.0);
 
+            self.draw_integration_row(ui);
+            ui.add_space(8.0);
+
             if self.show_verify {
                 self.draw_verify_panel(ui);
                 ui.add_space(10.0);
@@ -202,7 +210,36 @@ impl DiagnosticsApp {
         match pending {
             Pending::Verify => {
                 self.run_verify();
+                self.integration = maintenance::read_integration();
                 return;
+            }
+            Pending::SetStartup(enabled) => match maintenance::set_run_at_startup(enabled) {
+                Ok(msg) => {
+                    self.status = msg;
+                    self.status_ok = true;
+                }
+                Err(e) => {
+                    self.status = format!("Startup option failed: {e}");
+                    self.status_ok = false;
+                }
+            },
+            Pending::SetPostUpdate(enabled) => {
+                if !self.elevated {
+                    self.status =
+                        "Administrator required to create the post-update scheduled task.".into();
+                    self.status_ok = false;
+                    return;
+                }
+                match maintenance::set_post_update_task(enabled) {
+                    Ok(msg) => {
+                        self.status = msg;
+                        self.status_ok = true;
+                    }
+                    Err(e) => {
+                        self.status = format!("Post-update task failed: {e}");
+                        self.status_ok = false;
+                    }
+                }
             }
             Pending::One { id, active } => {
                 if !self.elevated {
@@ -254,9 +291,52 @@ impl DiagnosticsApp {
             }
         }
         self.refresh();
+        self.integration = maintenance::read_integration();
         if self.show_verify {
             self.verify_stamp = chrono_stamp();
         }
+    }
+
+    fn draw_integration_row(&mut self, ui: &mut Ui) {
+        egui::Frame::group(ui.style())
+            .inner_margin(10.0)
+            .corner_radius(6.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new("Automation").strong());
+                ui.label(
+                    RichText::new(
+                        "Optional: open the app at logon, and re-run lockdown after Windows Update \
+                         (Event ID 19) with a logon backup.",
+                    )
+                    .small()
+                    .weak(),
+                );
+                ui.add_space(4.0);
+
+                let mut startup = self.integration.run_at_startup;
+                if ui
+                    .checkbox(&mut startup, "Run GUI when Windows starts")
+                    .changed()
+                {
+                    self.pending = Some(Pending::SetStartup(startup));
+                }
+
+                let mut post = self.integration.post_update;
+                let post_resp = ui.checkbox(
+                    &mut post,
+                    "Re-apply lockdown after Windows Update (scheduled task)",
+                );
+                if post_resp.changed() {
+                    self.pending = Some(Pending::SetPostUpdate(post));
+                }
+                if !self.elevated {
+                    ui.label(
+                        RichText::new("Post-update task requires Administrator.")
+                            .small()
+                            .color(Color32::from_rgb(220, 140, 100)),
+                    );
+                }
+            });
     }
 
     fn draw_verify_panel(&mut self, ui: &mut Ui) {

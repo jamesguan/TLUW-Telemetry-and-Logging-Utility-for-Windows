@@ -10,6 +10,7 @@
 
 #![cfg(windows)]
 
+pub mod maintenance;
 pub mod telemetry;
 
 #[cfg(feature = "gui")]

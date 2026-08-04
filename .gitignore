@@ -1,7 +1,11 @@
 /target
+/target-msi
+/tools/wix
+/tools/wix-root
 **/*.rs.bk
 Cargo.lock.bak
 .DS_Store
 Thumbs.db
 *.pdb
 *.lnk
+*.msi
