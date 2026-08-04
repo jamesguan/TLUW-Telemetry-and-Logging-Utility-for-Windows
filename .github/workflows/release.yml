@@ -111,7 +111,15 @@ jobs:
           $ver = "${{ steps.ver.outputs.version }}"
           $tag = "${{ steps.ver.outputs.tag }}"
           git add Cargo.toml Cargo.lock
-          git commit -m "chore(release): $tag"
+          $staged = git diff --cached --name-only
+          if ($staged) {
+            git commit -m "chore(release): $tag"
+          } else {
+            Write-Host "No Cargo.toml/Cargo.lock changes (catch-up release); tagging current HEAD"
+          }
+          if (git rev-parse -q --verify "refs/tags/$tag") {
+            throw "Tag $tag already exists"
+          }
           git tag -a $tag -m "Release $tag"
           git push origin HEAD:main
           git push origin $tag
