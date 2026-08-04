@@ -1,8 +1,10 @@
 //! Optional OS integration: run at logon, re-apply after Windows Update.
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use winreg::enums::*;
 use winreg::RegKey;
+
+use crate::win_cmd;
 
 const RUN_VALUE: &str = "WindowsDiagnostics";
 pub const TASK_NAME: &str = "WindowsDiagnosticsPostUpdate";
@@ -62,7 +64,7 @@ pub fn set_run_at_startup(enabled: bool) -> Result<String, String> {
 }
 
 pub fn is_post_update_enabled() -> bool {
-    Command::new("schtasks.exe")
+    win_cmd::command("schtasks.exe")
         .args(["/Query", "/TN", TASK_NAME])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -75,7 +77,7 @@ pub fn is_post_update_enabled() -> bool {
 /// re-run `windows-diagnostics disable`.
 pub fn set_post_update_task(enabled: bool) -> Result<String, String> {
     if !enabled {
-        let _ = Command::new("schtasks.exe")
+        let _ = win_cmd::command("schtasks.exe")
             .args(["/Delete", "/TN", TASK_NAME, "/F"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -147,13 +149,13 @@ pub fn set_post_update_task(enabled: bool) -> Result<String, String> {
     }
     std::fs::write(&tmp, &utf16).map_err(|e| e.to_string())?;
 
-    let _ = Command::new("schtasks.exe")
+    let _ = win_cmd::command("schtasks.exe")
         .args(["/Delete", "/TN", TASK_NAME, "/F"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
 
-    let out = Command::new("schtasks.exe")
+    let out = win_cmd::command("schtasks.exe")
         .args([
             "/Create",
             "/TN",
@@ -185,14 +187,14 @@ pub fn set_post_update_task(enabled: bool) -> Result<String, String> {
 }
 
 fn create_simple_post_update_fallback(cli: &str) -> Result<(), String> {
-    let _ = Command::new("schtasks.exe")
+    let _ = win_cmd::command("schtasks.exe")
         .args(["/Delete", "/TN", TASK_NAME, "/F"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
 
     let tr = format!("\"{cli}\" disable --no-elevate");
-    let out = Command::new("schtasks.exe")
+    let out = win_cmd::command("schtasks.exe")
         .args([
             "/Create",
             "/TN",

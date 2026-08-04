@@ -1,0 +1,45 @@
+---
+description: Architecture — library core, CLI and GUI as thin fronts
+alwaysApply: true
+---
+
+# Modularity (library → CLI → GUI)
+
+## Layout
+
+| Layer | Location | Role |
+|-------|----------|------|
+| Library | `src/telemetry.rs`, `src/maintenance.rs` | Core logic: read/apply settings, elevation, startup/post-update |
+| CLI | `src/bin/cli.rs` → `windows-diagnostics` | Exposes commands over the library |
+| GUI | `src/gui.rs` + `src/bin/gui.rs` → `windows-diagnostics-gui` | Thin UI; calls the same library APIs |
+
+Both binaries are independently runnable (`cli` / `gui` features). Shared helpers (e.g. hidden Windows subprocesses) live in the library (`win_cmd`).
+
+## Prefer this order when changing behavior
+
+1. **Extend the library** (`telemetry` / `maintenance`) with the real operation.
+2. **Expose it on the CLI** if users should script it (`status`, `disable`, `enable`, `set`, `startup`, `post-update`, `integration`, explain/list).
+3. **Wire the GUI** to call those library APIs — do **not** reimplement registry, `sc`, or `schtasks` logic in `gui.rs`.
+
+## GUI ↔ CLI parity
+
+GUI actions should map to the same library operations as CLI:
+
+- status / verify → `read_all` / `read_one`
+- disable / enable / set → `apply` / `apply_all`
+- startup / post-update / integration → `maintenance::*`
+- logs / open → `system_links::*` (Event Viewer, Settings diagnostics pages, log folders, …)
+
+## Do / don't
+
+```text
+// ✅ GOOD — GUI delegates
+let settings = telemetry::read_all();
+telemetry::apply(id, active)?;
+
+// ❌ BAD — GUI shells out or duplicates policy paths
+Command::new("reg").args([...]);
+// hard-coded HKLM paths only in gui.rs
+```
+
+Keep CLI and GUI independently buildable; never make core behavior GUI-only.

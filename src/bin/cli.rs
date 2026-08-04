@@ -8,6 +8,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use windows_diagnostics::maintenance;
+use windows_diagnostics::system_links;
 use windows_diagnostics::telemetry::{
     self, apply, apply_all, ensure_elevated, read_all, read_one, SettingId,
 };
@@ -70,6 +71,16 @@ enum Commands {
     #[command(name = "post-update")]
     PostUpdate {
         state: OnOff,
+    },
+
+    /// List Windows logging / diagnostics tools this app can open
+    #[command(name = "logs", alias = "links")]
+    Logs,
+
+    /// Open a Windows logging tool by id (see `logs`)
+    Open {
+        /// Link id, e.g. event-viewer, privacy-feedback
+        id: String,
     },
 }
 
@@ -158,6 +169,24 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
                 Err(e) => Err(e),
             }
         }
+        Commands::Logs => {
+            println!("{:<22} {}", "ID", "TITLE");
+            println!("{}", "-".repeat(72));
+            for link in system_links::ALL {
+                println!("{:<22} {}", link.id, link.title);
+                println!("  {}", link.description);
+            }
+            println!();
+            println!("Open one: windows-diagnostics open <id>");
+            Ok(())
+        }
+        Commands::Open { id } => match system_links::open_id(&id) {
+            Ok(msg) => {
+                println!("{msg}");
+                Ok(())
+            }
+            Err(e) => Err(e),
+        },
     }
 }
 

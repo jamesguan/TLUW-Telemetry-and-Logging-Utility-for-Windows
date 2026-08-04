@@ -8,7 +8,7 @@ Modular Rust tools to inspect and toggle Windows diagnostic data / telemetry.
 | `windows-diagnostics-gui.exe` | **GUI** |
 | `Windows Diagnostics-*.msi` | **Installer** (desktop shortcut, optional startup + post-update) |
 
-Both apps call `windows_diagnostics::telemetry`. The GUI is a front-end over the same commands.
+**Modularity:** core logic lives in the library (`telemetry`, `maintenance`). The CLI exposes commands; the GUI is a thin front-end over the same APIs (status, disable, enable, set, startup, post-update, integration). Prefer extending the library + CLI first; keep both binaries independently runnable.
 
 ```text
 src/
@@ -109,6 +109,11 @@ Installer options (feature tree):
 .\target\release\windows-diagnostics.exe startup on
 .\target\release\windows-diagnostics.exe post-update on
 .\target\release\windows-diagnostics.exe integration
+
+# Windows logs / tools (same buttons as GUI)
+.\target\release\windows-diagnostics.exe logs
+.\target\release\windows-diagnostics.exe open event-viewer
+.\target\release\windows-diagnostics.exe open privacy-feedback
 ```
 
 ---
@@ -178,4 +183,7 @@ Repo: https://github.com/jamesguan/disable-windows-diagnostics
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — see [LICENSE](LICENSE).
+
+**Personal / private and other non-commercial use only.** Commercial use is not allowed.  
+(This is source-available, not OSI “Open Source,” which requires allowing commercial use.)
