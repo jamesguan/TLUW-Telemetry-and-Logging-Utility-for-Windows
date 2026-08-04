@@ -1,35 +1,68 @@
 name: Release
 
-# Automatic release on every merge/push to main.
-# Also still supports version tags (v*) and manual runs.
+# On every merge/push to main (except our own release commits):
+#   1. Semver-bump Cargo.toml from Conventional Commits since the last v* tag
+#   2. Build MSI + binaries
+#   3. Commit chore(release), tag vX.Y.Z, publish GitHub Release
+#
+# Manual: Actions → Release → Run workflow (choose major/minor/patch/auto)
+
 on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Optional explicit tag (e.g. v0.3.1). Leave empty to auto-generate."
-        required: false
-        default: ""
+      bump:
+        description: "Version bump"
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-main
+  cancel-in-progress: false
 
 jobs:
-  windows-msi:
+  release:
     runs-on: windows-latest
+    # Avoid infinite loop when we push "chore(release): vX.Y.Z"
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+       !startsWith(github.event.head_commit.message, 'chore(release):'))
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $bump = "${{ github.event.inputs.bump }}"
+          } else {
+            $bump = "auto"
+          }
+          if ([string]::IsNullOrWhiteSpace($bump)) { $bump = "auto" }
+          Write-Host "Bump mode: $bump"
+          & .\.github\scripts\bump-version.ps1 -Bump $bump -WriteFiles
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -72,48 +105,32 @@ jobs:
           "name=$($msi.Name)" >> $env:GITHUB_OUTPUT
           Get-Item $msi.FullName | Format-List FullName, Length
 
-      - name: Resolve release tag
-        id: tag
+      - name: Commit version bump and tag
         shell: pwsh
         run: |
-          $ver = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          $sha = $env:GITHUB_SHA.Substring(0, 7)
-          $run = $env:GITHUB_RUN_NUMBER
-
-          if ($env:GITHUB_REF_TYPE -eq "tag") {
-            $name = $env:GITHUB_REF_NAME
-            $title = "Telemetry Logging Utility $name"
-          } elseif ("${{ github.event.inputs.tag }}" -ne "") {
-            $name = "${{ github.event.inputs.tag }}"
-            $title = "Telemetry Logging Utility $name"
-          } elseif ($env:GITHUB_REF_NAME -eq "main") {
-            # Unique per merge/push to main so releases never collide
-            $name = "v$ver-build.$run"
-            $title = "Telemetry Logging Utility v$ver (build $run)"
-          } else {
-            $name = "v$ver-build.$run+$sha"
-            $title = "Telemetry Logging Utility v$ver (build $run)"
-          }
-
-          "name=$name" >> $env:GITHUB_OUTPUT
-          "title=$title" >> $env:GITHUB_OUTPUT
-          "cargo_version=$ver" >> $env:GITHUB_OUTPUT
-          "sha=$sha" >> $env:GITHUB_OUTPUT
-          Write-Host "Release tag: $name"
+          $ver = "${{ steps.ver.outputs.version }}"
+          $tag = "${{ steps.ver.outputs.tag }}"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore(release): $tag"
+          git tag -a $tag -m "Release $tag"
+          git push origin HEAD:main
+          git push origin $tag
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.name }}
-          name: ${{ steps.tag.outputs.title }}
-          target_commitish: ${{ github.sha }}
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Telemetry Logging Utility ${{ steps.ver.outputs.tag }}
           generate_release_notes: true
           make_latest: true
           body: |
-            Automated release from `${{ github.ref_name }}` (`${{ steps.tag.outputs.sha }}`).
+            Automated semver release (`${{ steps.ver.outputs.bump }}` — ${{ steps.ver.outputs.reason }}).
 
-            - Cargo version: `${{ steps.tag.outputs.cargo_version }}`
-            - MSI + CLI (`tluw.exe`) + GUI (`tluw-gui.exe`)
+            - Version: `${{ steps.ver.outputs.version }}`
+            - MSI installer + CLI (`tluw.exe`) + GUI (`tluw-gui.exe`)
+
+            ### Install
+            Download the `.msi` below and run it as Administrator.
           files: |
             ${{ steps.msi.outputs.path }}
             target/release/tluw.exe
