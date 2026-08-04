@@ -1,8 +1,8 @@
 # Disclaimer — No Warranty — Limitation of Liability
 
-**USE AT YOUR OWN RISK.** Windows Diagnostics is provided **AS IS** with **NO WARRANTY**. The authors accept **NO LIABILITY** for any damages arising from use of this software.
+**USE AT YOUR OWN RISK.** Telemetry and Logging Utility for Windows is provided **AS IS** with **NO WARRANTY**. The authors accept **NO LIABILITY** for any damages arising from use of this software.
 
-By downloading, installing, copying, or using Windows Diagnostics (the “Software”), including the CLI, GUI, and installer, you acknowledge and agree to all of the following.
+By downloading, installing, copying, or using Telemetry and Logging Utility for Windows (the “Software”), including the CLI, GUI, and installer, you acknowledge and agree to all of the following.
 
 ## 1. No warranty
 

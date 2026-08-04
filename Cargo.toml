@@ -1,40 +1,39 @@
 [package]
-name = "windows-diagnostics"
-version = "0.3.0"
+name = "telemetry-logging-utility"
+version = "0.4.0"
 edition = "2021"
-description = "CLI and GUI tools to inspect and toggle Windows diagnostic data / telemetry"
+description = "CLI and GUI tools to inspect and toggle Windows diagnostic data / telemetry and clear logs"
 license = "PolyForm-Noncommercial-1.0.0"
 readme = "README.md"
 authors = ["James Guan"]
 homepage = "https://github.com/jamesguan/disable-windows-diagnostics"
 repository = "https://github.com/jamesguan/disable-windows-diagnostics"
-keywords = ["windows", "telemetry", "privacy", "diagnostics", "cli"]
+keywords = ["windows", "telemetry", "privacy", "logging", "cli"]
 categories = ["command-line-utilities", "gui"]
 
 [lib]
-name = "windows_diagnostics"
+name = "telemetry_logging_utility"
 path = "src/lib.rs"
 
 [[bin]]
-name = "windows-diagnostics"
+name = "tluw"
 path = "src/bin/cli.rs"
 required-features = ["cli"]
 
 [[bin]]
-name = "windows-diagnostics-gui"
+name = "tluw-gui"
 path = "src/bin/gui.rs"
 required-features = ["gui"]
 
 [features]
 default = ["cli", "gui"]
 cli = ["dep:clap"]
-gui = ["dep:eframe", "dep:egui", "dep:tray-icon", "dep:raw-window-handle", "dep:image"]
+gui = ["dep:iced", "dep:tray-icon", "dep:raw-window-handle", "dep:image"]
 
 [dependencies]
 winreg = "0.55"
 clap = { version = "4", features = ["derive"], optional = true }
-eframe = { version = "0.31", default-features = true, features = ["default_fonts", "glow"], optional = true }
-egui = { version = "0.31", optional = true }
+iced = { version = "0.14", optional = true, features = ["wgpu", "canvas", "image", "tokio"] }
 tray-icon = { version = "0.19", optional = true }
 raw-window-handle = { version = "0.6", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
@@ -44,10 +43,10 @@ winres = "0.1"
 
 [package.metadata.wix]
 # MSI name / product
-name = "Windows Diagnostics"
+name = "Telemetry and Logging Utility for Windows"
 # Include both binaries via custom wix/main.wxs
 eula = false
 license = false
-product-icon = "assets/windows-diagnostics-icon.ico"
+product-icon = "assets/tluw-icon.ico"
 # Path where MSI is written (relative to target/)
 include = []

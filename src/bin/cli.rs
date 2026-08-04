@@ -1,30 +1,31 @@
-//! Command-line interface for Windows Diagnostics.
+//! Command-line interface for Telemetry and Logging Utility for Windows.
 //!
-//! Thin wrapper around [`windows_diagnostics::telemetry`].
+//! Thin wrapper around [`telemetry_logging_utility::telemetry`].
 
 #![cfg(windows)]
 
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use windows_diagnostics::cleanup_history;
-use windows_diagnostics::disclaimer;
-use windows_diagnostics::log_cleanup;
-use windows_diagnostics::maintenance;
-use windows_diagnostics::system_links;
-use windows_diagnostics::telemetry::{
+use telemetry_logging_utility::cleanup_history;
+use telemetry_logging_utility::disclaimer;
+use telemetry_logging_utility::identity;
+use telemetry_logging_utility::log_cleanup;
+use telemetry_logging_utility::maintenance;
+use telemetry_logging_utility::system_links;
+use telemetry_logging_utility::telemetry::{
     self, apply, apply_all, ensure_elevated, read_all, read_one, SettingId,
 };
-use windows_diagnostics::temp_cleanup;
+use telemetry_logging_utility::temp_cleanup;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "windows-diagnostics",
-    about = "Inspect and toggle Windows diagnostic data / telemetry (CLI)",
-    long_about = "Core commands to disable or enable Windows diagnostic collection.\n\
-                  The GUI (windows-diagnostics-gui.exe) is optional and calls the same library.\n\n\
+    name = "tluw",
+    about = "Telemetry and Logging Utility for Windows (CLI)",
+    long_about = "Inspect and toggle Windows diagnostic / telemetry settings, and clear logs/temp.\n\
+                  The GUI (tluw-gui.exe) is optional and calls the same library.\n\n\
                   USE AT YOUR OWN RISK — AS IS, NO WARRANTY, NO LIABILITY.\n\
-                  See `windows-diagnostics disclaimer` and DISCLAIMER.md."
+                  See `tluw disclaimer` and DISCLAIMER.md."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -166,6 +167,8 @@ impl OnOff {
 }
 
 fn main() -> ExitCode {
+    telemetry_logging_utility::bootstrap();
+
     let cli = Cli::parse();
     let command = cli.command.unwrap_or(Commands::Status);
 
@@ -214,7 +217,7 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
             println!(
                 "post-update:    {}  (task: {})",
                 if s.post_update { "ON" } else { "OFF" },
-                maintenance::TASK_NAME
+                identity::TASK_NAME
             );
             Ok(())
         }
@@ -246,7 +249,7 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
                 println!("  {}", link.description);
             }
             println!();
-            println!("Open one: windows-diagnostics open <id>");
+            println!("Open one: tluw open <id>");
             Ok(())
         }
         Commands::Open { id } => match system_links::open_id(&id) {
@@ -271,9 +274,9 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
                 }
             }
             println!();
-            println!("Open loc:   windows-diagnostics open-log <id>");
-            println!("Clear one:  windows-diagnostics clear <id> --confirm");
-            println!("Clear safe: windows-diagnostics clear-all --confirm");
+            println!("Open loc:   tluw open-log <id>");
+            println!("Clear one:  tluw clear <id> --confirm");
+            println!("Clear safe: tluw clear-all --confirm");
             Ok(())
         }
         Commands::OpenLog { id } => {
@@ -359,9 +362,9 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
                 println!("  {}", temp_cleanup::inspect(t).summary_line());
             }
             println!();
-            println!("Open:  windows-diagnostics open-temp <id>");
-            println!("Clear: windows-diagnostics clear-temp <id> --confirm");
-            println!("All:   windows-diagnostics clear-temp-all --confirm");
+            println!("Open:  tluw open-temp <id>");
+            println!("Clear: tluw clear-temp <id> --confirm");
+            println!("All:   tluw clear-temp-all --confirm");
             Ok(())
         }
         Commands::OpenTemp { id } => {
@@ -444,8 +447,8 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
                         rec.accepted_at, rec.user, rec.computer, rec.version
                     );
                     println!(
-                        "Stored in HKCU\\Software\\WindowsDiagnostics\\Disclaimer \
-                         (+ %APPDATA%\\WindowsDiagnostics backup). Not wiped by TEMP/log clears. Not uploaded."
+                        "Stored in HKCU\\Software\\TelemetryLoggingUtility\\Disclaimer \
+                         (+ %APPDATA%\\TelemetryLoggingUtility backup). Not wiped by TEMP/log clears. Not uploaded."
                     );
                 }
                 Err(e) => eprintln!("Could not save acceptance record: {e}"),
@@ -515,7 +518,7 @@ fn cmd_status() -> Result<(), String> {
     }
     println!();
     println!("OFF = blocked/privacy   ON = collecting/allowed");
-    println!("Tip: windows-diagnostics disable | enable | set <id> on|off");
+    println!("Tip: tluw disable | enable | set <id> on|off");
     Ok(())
 }
 

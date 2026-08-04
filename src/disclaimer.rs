@@ -1,11 +1,12 @@
 //! Disclaimer, no-warranty, and limitation of liability text + acceptance gate.
 //!
 //! Acceptance is stored **locally on the user's machine** (not uploaded):
-//! - **Primary:** `HKCU\Software\WindowsDiagnostics\Disclaimer` (survives TEMP/log wipes)
-//! - **Backup:** `%APPDATA%\WindowsDiagnostics\` (roaming; not a temp clear target)
+//! - **Primary:** `HKCU\Software\TelemetryLoggingUtility\Disclaimer` (survives TEMP/log wipes)
+//! - **Backup:** `%APPDATA%\TelemetryLoggingUtility\` (roaming; not a temp clear target)
 //!
 //! Canonical human copy: `DISCLAIMER.md`.
 
+use crate::identity;
 use crate::win_cmd;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -16,11 +17,11 @@ use winreg::RegKey;
 /// One-line notice for footers / help blurbs.
 pub const SHORT: &str = "USE AT YOUR OWN RISK. Provided AS IS with NO WARRANTY. Authors accept NO LIABILITY.";
 
-/// Full disclaimer shown before use (GUI) and via `windows-diagnostics disclaimer`.
+/// Full disclaimer shown before use (GUI) and via `tluw disclaimer`.
 pub const FULL: &str = "\
 DISCLAIMER — NO WARRANTY — LIMITATION OF LIABILITY — ASSUMPTION OF RISK
 
-By downloading, installing, copying, or using Windows Diagnostics (the \"Software\"), \
+By downloading, installing, copying, or using Telemetry and Logging Utility for Windows (the \"Software\"), \
 including the CLI, GUI, and installer, you acknowledge and agree to all of the following.
 
 1. NO WARRANTY. The Software is provided \"AS IS\" and \"AS AVAILABLE\", without warranty \
@@ -67,8 +68,6 @@ limited to the fullest extent the law permits (which may be zero monetary liabil
 where allowed).
 ";
 
-const REG_PATH: &str = r"Software\WindowsDiagnostics\Disclaimer";
-
 /// Snapshot of a local acceptance record.
 #[derive(Debug, Clone, Default)]
 pub struct AcceptanceRecord {
@@ -86,8 +85,7 @@ fn env_or(key: &str, fallback: &str) -> String {
 
 /// App data under **roaming** APPDATA — never targeted by our TEMP cleaners.
 fn roaming_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("APPDATA")?;
-    Some(PathBuf::from(base).join("WindowsDiagnostics"))
+    identity::roaming_dir()
 }
 
 fn marker_path() -> Option<PathBuf> {
@@ -98,10 +96,14 @@ fn log_path() -> Option<PathBuf> {
     Some(roaming_dir()?.join("disclaimer_acceptance.log"))
 }
 
-/// Legacy marker under LocalAppData (may sit next to Temp; migrate away).
-fn legacy_marker_path() -> Option<PathBuf> {
+/// LocalAppData marker path (same product folder name).
+fn local_marker_path() -> Option<PathBuf> {
     let base = std::env::var_os("LOCALAPPDATA")?;
-    Some(PathBuf::from(base).join("WindowsDiagnostics").join("disclaimer_accepted"))
+    Some(
+        PathBuf::from(base)
+            .join(identity::APPDATA_DIR)
+            .join("disclaimer_accepted"),
+    )
 }
 
 fn parse_file_record(text: &str) -> AcceptanceRecord {
@@ -131,7 +133,7 @@ fn parse_file_record(text: &str) -> AcceptanceRecord {
 
 fn read_registry() -> Option<AcceptanceRecord> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let key = hkcu.open_subkey(REG_PATH).ok()?;
+    let key = hkcu.open_subkey(identity::REG_DISCLAIMER).ok()?;
     let accepted: u32 = key.get_value("Accepted").ok()?;
     if accepted == 0 {
         return None;
@@ -151,7 +153,7 @@ fn read_registry() -> Option<AcceptanceRecord> {
 fn write_registry(rec: &AcceptanceRecord) -> Result<(), String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let (key, _) = hkcu
-        .create_subkey(REG_PATH)
+        .create_subkey(identity::REG_DISCLAIMER)
         .map_err(|e| format!("Could not open registry key: {e}"))?;
     key.set_value("Accepted", &1u32)
         .map_err(|e| format!("registry Accepted: {e}"))?;
@@ -185,7 +187,7 @@ fn write_file_backup(rec: &AcceptanceRecord) -> Result<(), String> {
          source={}\n\
          disclaimer_bytes={}\n\
          short={}\n\
-         storage=HKCU\\\\Software\\\\WindowsDiagnostics\\\\Disclaimer + APPDATA backup\n",
+         storage=HKCU\\\\Software\\\\TelemetryLoggingUtility\\\\Disclaimer + APPDATA backup\n",
         rec.accepted_at,
         rec.user,
         rec.computer,
@@ -231,7 +233,7 @@ pub fn read_record() -> Option<AcceptanceRecord> {
         // Accepted=1 with empty fields still counts.
         return Some(rec);
     }
-    for path in [marker_path(), legacy_marker_path()].into_iter().flatten() {
+    for path in [marker_path(), local_marker_path()].into_iter().flatten() {
         if let Ok(text) = fs::read_to_string(&path) {
             let rec = parse_file_record(&text);
             if !rec.accepted_at.is_empty() || !text.trim().is_empty() {

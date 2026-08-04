@@ -1,10 +1,9 @@
 //! Application icon (embedded PNG) for window chrome and system tray.
 
-use egui::IconData;
 use image::imageops::FilterType;
 use image::RgbaImage;
 
-const PNG: &[u8] = include_bytes!("../assets/windows-diagnostics-icon.png");
+const PNG: &[u8] = include_bytes!("../assets/tluw-icon.png");
 
 fn load_rgba(size: u32) -> (Vec<u8>, u32, u32) {
     let img = image::load_from_memory(PNG)
@@ -19,14 +18,16 @@ fn load_rgba(size: u32) -> (Vec<u8>, u32, u32) {
     (resized.into_raw(), w, h)
 }
 
-/// egui / eframe window icon (multi-size friendly: 256).
-pub fn egui_icon() -> IconData {
-    let (rgba, w, h) = load_rgba(256);
-    IconData {
-        rgba,
-        width: w,
-        height: h,
-    }
+/// RGBA bytes for window icon (256×256).
+pub fn window_rgba() -> (Vec<u8>, u32, u32) {
+    load_rgba(256)
+}
+
+/// Build an iced window icon from embedded PNG.
+#[cfg(feature = "gui")]
+pub fn iced_window_icon() -> iced::window::Icon {
+    let (rgba, w, h) = window_rgba();
+    iced::window::icon::from_rgba(rgba, w, h).expect("window icon")
 }
 
 /// RGBA bytes for `tray-icon` (32×32 reads cleanly in the notification area).

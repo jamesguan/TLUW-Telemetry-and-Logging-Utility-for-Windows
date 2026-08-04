@@ -1,8 +1,9 @@
 //! Daily cleanup history: bytes freed by log / temp clears (library API).
 //!
-//! Stored under `%APPDATA%\WindowsDiagnostics\cleanup_history.log` (not a TEMP path).
+//! Stored under `%APPDATA%\TelemetryLoggingUtility\cleanup_history.log` (not a TEMP path).
 //! GUI dashboard + CLI `history` read the same file.
 
+use crate::identity;
 use crate::win_cmd;
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
@@ -46,8 +47,7 @@ impl DayTotals {
 }
 
 fn history_path() -> Option<PathBuf> {
-    let base = std::env::var_os("APPDATA")?;
-    Some(PathBuf::from(base).join("WindowsDiagnostics").join("cleanup_history.log"))
+    Some(identity::roaming_dir()?.join("cleanup_history.log"))
 }
 
 fn today() -> String {

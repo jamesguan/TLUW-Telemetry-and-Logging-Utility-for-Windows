@@ -82,17 +82,17 @@ jobs:
 
           if ($env:GITHUB_REF_TYPE -eq "tag") {
             $name = $env:GITHUB_REF_NAME
-            $title = "Windows Diagnostics $name"
+            $title = "Telemetry Logging Utility $name"
           } elseif ("${{ github.event.inputs.tag }}" -ne "") {
             $name = "${{ github.event.inputs.tag }}"
-            $title = "Windows Diagnostics $name"
+            $title = "Telemetry Logging Utility $name"
           } elseif ($env:GITHUB_REF_NAME -eq "main") {
             # Unique per merge/push to main so releases never collide
             $name = "v$ver-build.$run"
-            $title = "Windows Diagnostics v$ver (build $run)"
+            $title = "Telemetry Logging Utility v$ver (build $run)"
           } else {
             $name = "v$ver-build.$run+$sha"
-            $title = "Windows Diagnostics v$ver (build $run)"
+            $title = "Telemetry Logging Utility v$ver (build $run)"
           }
 
           "name=$name" >> $env:GITHUB_OUTPUT
@@ -113,11 +113,11 @@ jobs:
             Automated release from `${{ github.ref_name }}` (`${{ steps.tag.outputs.sha }}`).
 
             - Cargo version: `${{ steps.tag.outputs.cargo_version }}`
-            - MSI + CLI (`windows-diagnostics.exe`) + GUI (`windows-diagnostics-gui.exe`)
+            - MSI + CLI (`tluw.exe`) + GUI (`tluw-gui.exe`)
           files: |
             ${{ steps.msi.outputs.path }}
-            target/release/windows-diagnostics.exe
-            target/release/windows-diagnostics-gui.exe
+            target/release/tluw.exe
+            target/release/tluw-gui.exe
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

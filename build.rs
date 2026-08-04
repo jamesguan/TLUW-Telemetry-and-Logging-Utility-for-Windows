@@ -9,7 +9,7 @@ fn main() {
         return;
     }
 
-    let icon = std::path::Path::new("assets/windows-diagnostics-icon.ico");
+    let icon = std::path::Path::new("assets/tluw-icon.ico");
     if !icon.exists() {
         println!("cargo:warning=missing {icon:?}; PE icon not embedded");
         return;
@@ -17,8 +17,10 @@ fn main() {
 
     let mut res = winres::WindowsResource::new();
     res.set_icon(icon.to_str().unwrap());
-    res.set("ProductName", "Windows Diagnostics");
-    res.set("FileDescription", "Windows Diagnostics");
+    res.set("ProductName", "Telemetry and Logging Utility for Windows");
+    res.set("FileDescription", "Telemetry and Logging Utility for Windows");
+    res.set("CompanyName", "Chillcoders LLC");
+    res.set("LegalCopyright", "Copyright (c) 2026 James Guan / Chillcoders LLC");
     if let Err(e) = res.compile() {
         println!("cargo:warning=winres failed: {e}");
     }

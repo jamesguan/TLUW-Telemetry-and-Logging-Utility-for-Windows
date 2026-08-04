@@ -4,10 +4,8 @@ use std::process::Stdio;
 use winreg::enums::*;
 use winreg::RegKey;
 
+use crate::identity::{self, CLI_BIN, GUI_BIN, RUN_VALUE, TASK_NAME};
 use crate::win_cmd;
-
-const RUN_VALUE: &str = "WindowsDiagnostics";
-pub const TASK_NAME: &str = "WindowsDiagnosticsPostUpdate";
 
 fn install_dir() -> Result<std::path::PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -18,21 +16,62 @@ fn install_dir() -> Result<std::path::PathBuf, String> {
 
 fn gui_exe_path() -> Result<std::path::PathBuf, String> {
     let dir = install_dir()?;
-    let gui = dir.join("windows-diagnostics-gui.exe");
+    let gui = dir.join(format!("{GUI_BIN}.exe"));
     if gui.exists() {
         Ok(gui)
     } else {
-        Ok(std::env::current_exe().map_err(|e| e.to_string())?)
+        // Side-by-side during upgrades: former binary name.
+        let legacy = dir.join("windows-diagnostics-gui.exe");
+        if legacy.exists() {
+            Ok(legacy)
+        } else {
+            Ok(std::env::current_exe().map_err(|e| e.to_string())?)
+        }
     }
 }
 
 fn cli_exe_path() -> Result<std::path::PathBuf, String> {
     let dir = install_dir()?;
-    let cli = dir.join("windows-diagnostics.exe");
+    let cli = dir.join(format!("{CLI_BIN}.exe"));
     if cli.exists() {
         Ok(cli)
     } else {
-        Ok(std::env::current_exe().map_err(|e| e.to_string())?)
+        let legacy = dir.join("windows-diagnostics.exe");
+        if legacy.exists() {
+            Ok(legacy)
+        } else {
+            Ok(std::env::current_exe().map_err(|e| e.to_string())?)
+        }
+    }
+}
+
+fn task_exists(name: &str) -> bool {
+    win_cmd::command("schtasks.exe")
+        .args(["/Query", "/TN", name])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn delete_task(name: &str) {
+    let _ = win_cmd::command("schtasks.exe")
+        .args(["/Delete", "/TN", name, "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// Move legacy post-update task to the new name (idempotent).
+pub fn migrate_legacy_post_update() {
+    let legacy = identity::LEGACY_TASK_NAME;
+    let had_legacy = task_exists(legacy);
+    if had_legacy {
+        delete_task(legacy);
+    }
+    if had_legacy && !task_exists(TASK_NAME) {
+        let _ = set_post_update_task(true);
     }
 }
 
@@ -51,6 +90,9 @@ pub fn set_run_at_startup(enabled: bool) -> Result<String, String> {
         .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")
         .map_err(|e| e.to_string())?;
 
+    // Always drop the former Run value name.
+    let _ = key.delete_value("WindowsDiagnostics");
+
     if enabled {
         let path = gui_exe_path()?;
         let value = format!("\"{}\"", path.display());
@@ -64,24 +106,17 @@ pub fn set_run_at_startup(enabled: bool) -> Result<String, String> {
 }
 
 pub fn is_post_update_enabled() -> bool {
-    win_cmd::command("schtasks.exe")
-        .args(["/Query", "/TN", TASK_NAME])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    task_exists(TASK_NAME)
 }
 
 /// After a successful Windows Update (Event ID 19) and as a logon backup,
-/// re-run `windows-diagnostics disable`.
+/// re-run `tluw disable`.
 pub fn set_post_update_task(enabled: bool) -> Result<String, String> {
+    // Clean former task name whenever we touch integration.
+    delete_task(identity::LEGACY_TASK_NAME);
+
     if !enabled {
-        let _ = win_cmd::command("schtasks.exe")
-            .args(["/Delete", "/TN", TASK_NAME, "/F"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        delete_task(TASK_NAME);
         return Ok("Post-update task removed".into());
     }
 
@@ -94,7 +129,7 @@ pub fn set_post_update_task(enabled: bool) -> Result<String, String> {
     xml.push_str(
         r#"<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Re-apply Windows Diagnostics lockdown after Windows Update and at logon.</Description>
+    <Description>Re-apply Telemetry and Logging Utility for Windows lockdown after Windows Update and at logon.</Description>
   </RegistrationInfo>
   <Triggers>
     <EventTrigger>
@@ -141,7 +176,7 @@ pub fn set_post_update_task(enabled: bool) -> Result<String, String> {
 "#,
     );
 
-    let tmp = std::env::temp_dir().join("windows-diagnostics-postupdate.xml");
+    let tmp = std::env::temp_dir().join("tluw-postupdate.xml");
     // UTF-16 LE with BOM — schtasks /XML expects this on many Windows builds.
     let mut utf16: Vec<u8> = vec![0xFF, 0xFE];
     for u in xml.encode_utf16() {
@@ -149,11 +184,7 @@ pub fn set_post_update_task(enabled: bool) -> Result<String, String> {
     }
     std::fs::write(&tmp, &utf16).map_err(|e| e.to_string())?;
 
-    let _ = win_cmd::command("schtasks.exe")
-        .args(["/Delete", "/TN", TASK_NAME, "/F"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    delete_task(TASK_NAME);
 
     let out = win_cmd::command("schtasks.exe")
         .args([
@@ -187,11 +218,7 @@ pub fn set_post_update_task(enabled: bool) -> Result<String, String> {
 }
 
 fn create_simple_post_update_fallback(cli: &str) -> Result<(), String> {
-    let _ = win_cmd::command("schtasks.exe")
-        .args(["/Delete", "/TN", TASK_NAME, "/F"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    delete_task(TASK_NAME);
 
     let tr = format!("\"{cli}\" disable --no-elevate");
     let out = win_cmd::command("schtasks.exe")

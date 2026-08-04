@@ -143,9 +143,9 @@ pub const ALL: &[ClearAction] = &[
     ClearAction {
         id: "event-diag-perf",
         title: "Diagnostics-Performance log",
-        description: "Microsoft-Windows-Diagnostics-Performance/Operational.",
+        description: "Microsoft-tluw-Performance/Operational.",
         dangerous: false,
-        kind: ClearKind::EventLog("Microsoft-Windows-Diagnostics-Performance/Operational"),
+        kind: ClearKind::EventLog("Microsoft-tluw-Performance/Operational"),
     },
     ClearAction {
         id: "event-diagtrack",
