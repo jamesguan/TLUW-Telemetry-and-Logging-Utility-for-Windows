@@ -1,0 +1,19 @@
+[package]
+name = "windows-diagnostics"
+version = "0.1.0"
+edition = "2021"
+description = "Disable Windows diagnostic data, telemetry, and related analytics"
+license = "MIT"
+readme = "README.md"
+keywords = ["windows", "telemetry", "privacy", "diagnostics"]
+categories = ["command-line-utilities", "os"]
+repository = "https://github.com/OWNER/windows-diagnostics"
+
+[dependencies]
+winreg = "0.55"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "z"
