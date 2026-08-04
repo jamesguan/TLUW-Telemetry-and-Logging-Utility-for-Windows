@@ -1,12 +1,12 @@
-# Windows Diagnostics
+# Telemetry and Logging Utility for Windows
 
-Modular Rust tools to inspect and toggle Windows diagnostic data / telemetry.
+Published by **Chillcoders LLC**. Author: **James Guan**. Modular Rust tools to inspect and toggle Windows diagnostic data / telemetry.
 
 | Artifact | Role |
 |----------|------|
-| `windows-diagnostics.exe` | **CLI** |
-| `windows-diagnostics-gui.exe` | **GUI** |
-| `Windows Diagnostics-*.msi` | **Installer** (desktop shortcut, optional startup + post-update) |
+| `tluw.exe` | **CLI** |
+| `tluw-gui.exe` | **GUI** |
+| `Telemetry Logging Utility-*.msi` | **Installer** (desktop shortcut, optional startup + post-update) |
 
 **Modularity:** core logic lives in the library (`telemetry`, `maintenance`). The CLI exposes commands; the GUI is a thin front-end over the same APIs (status, disable, enable, set, startup, post-update, integration). Prefer extending the library + CLI first; keep both binaries independently runnable.
 
@@ -16,7 +16,7 @@ src/
   bin/cli.rs
   bin/gui.rs
 wix/main.wxs                  MSI definition (cargo-wix)
-.github/workflows/release.yml Tag → build MSI → GitHub Release
+.github/workflows/release.yml  Merge to main → build MSI → GitHub Release
 ```
 
 ---
@@ -29,14 +29,14 @@ wix/main.wxs                  MSI definition (cargo-wix)
    - **Desktop shortcut** (on by default)
    - **Add to PATH** (on by default)
    - **Run when Windows starts** (off by default) — Startup-folder shortcut to the GUI
-   - **Re-apply after Windows Update** (off by default) — scheduled task on WU Event ID 19 + logon backup that runs `windows-diagnostics disable`
+   - **Re-apply after Windows Update** (off by default) — scheduled task on WU Event ID 19 + logon backup that runs `tluw disable`
 
 You can also toggle startup / post-update later in the GUI (**Automation**) or via CLI:
 
 ```powershell
-windows-diagnostics startup on
-windows-diagnostics post-update on
-windows-diagnostics integration
+tluw startup on
+tluw post-update on
+tluw integration
 ```
 
 ---
@@ -53,8 +53,8 @@ cargo build --release
 Outputs:
 
 ```text
-target\release\windows-diagnostics.exe
-target\release\windows-diagnostics-gui.exe
+target\release\tluw.exe
+target\release\tluw-gui.exe
 ```
 
 ### Build the MSI installer (`cargo wix`)
@@ -83,9 +83,9 @@ Installer options (feature tree):
 | Desktop shortcut | On | Shortcut to GUI on Desktop |
 | Add to PATH | On | `bin` on system PATH |
 | Run when Windows starts | Off | Startup folder → GUI |
-| Re-apply after Windows Update | Off | Task `WindowsDiagnosticsPostUpdate` |
+| Re-apply after Windows Update | Off | Task `TelemetryLoggingUtilityPostUpdate` |
 
-**Post-update behavior:** listens for Microsoft Windows Update Client **Event ID 19** (successful install), waits 2 minutes, then runs `windows-diagnostics disable --no-elevate`. A **logon** trigger is also registered as a backup when the event is missed (common after large feature updates).
+**Post-update behavior:** listens for Microsoft Windows Update Client **Event ID 19** (successful install), waits 2 minutes, then runs `tluw disable --no-elevate`. A **logon** trigger is also registered as a backup when the event is missed (common after large feature updates).
 
 ---
 
@@ -94,26 +94,32 @@ Installer options (feature tree):
 ### GUI
 
 ```powershell
-.\target\release\windows-diagnostics-gui.exe
+.\target\release\tluw-gui.exe
 # or after install:
-# & "${env:ProgramFiles}\Windows Diagnostics\bin\windows-diagnostics-gui.exe"
+# & "${env:ProgramFiles}\Telemetry Logging Utility\bin\tluw-gui.exe"
 ```
 
 ### CLI
 
 ```powershell
-.\target\release\windows-diagnostics.exe status
-.\target\release\windows-diagnostics.exe disable
-.\target\release\windows-diagnostics.exe set diagtrack off
-.\target\release\windows-diagnostics.exe explain diagnostic-data
-.\target\release\windows-diagnostics.exe startup on
-.\target\release\windows-diagnostics.exe post-update on
-.\target\release\windows-diagnostics.exe integration
+.\target\release\tluw.exe status
+.\target\release\tluw.exe disable
+.\target\release\tluw.exe set diagtrack off
+.\target\release\tluw.exe explain diagnostic-data
+.\target\release\tluw.exe startup on
+.\target\release\tluw.exe post-update on
+.\target\release\tluw.exe integration
 
 # Windows logs / tools (same buttons as GUI)
-.\target\release\windows-diagnostics.exe logs
-.\target\release\windows-diagnostics.exe open event-viewer
-.\target\release\windows-diagnostics.exe open privacy-feedback
+.\target\release\tluw.exe logs
+.\target\release\tluw.exe open event-viewer
+.\target\release\tluw.exe open privacy-feedback
+
+# Clear logs (destructive; most need admin + --confirm)
+.\target\release\tluw.exe clear-list
+.\target\release\tluw.exe clear diagnosis --confirm
+.\target\release\tluw.exe clear event-application --confirm
+.\target\release\tluw.exe clear-all --confirm
 ```
 
 ---
@@ -122,39 +128,45 @@ Installer options (feature tree):
 
 ```powershell
 cargo build --release
-.\target\release\windows-diagnostics.exe status
-.\target\release\windows-diagnostics.exe set diagtrack off
-.\target\release\windows-diagnostics.exe status
+.\target\release\tluw.exe status
+.\target\release\tluw.exe set diagtrack off
+.\target\release\tluw.exe status
 
 # GUI: Verify status → change toggles → Verify status again
-.\target\release\windows-diagnostics-gui.exe
+.\target\release\tluw-gui.exe
 
 # Installer locally
 .\build-msi.ps1
 # Run the MSI, confirm Desktop shortcut, optional features, then:
-windows-diagnostics status
-windows-diagnostics integration
-schtasks /Query /TN WindowsDiagnosticsPostUpdate
+tluw status
+tluw integration
+schtasks /Query /TN TelemetryLoggingUtilityPostUpdate
 ```
 
 ---
 
 ## GitHub Releases (automatic)
 
-Pushing a version tag builds the MSI and publishes a GitHub Release (binaries + MSI):
+Every **push/merge to `main`** runs `.github/workflows/release.yml`, builds the MSI + binaries, and publishes a GitHub Release.
+
+- Tag format: `v{Cargo.toml version}-build.{run_number}` (unique each merge)
+- Also still works for manual `v*` tags and **Actions → Release → Run workflow**
 
 ```powershell
-git add -A
-git commit -m "Prepare release"
-git push origin HEAD
-
-# Tag must match Cargo.toml version (example 0.3.0)
-git tag v0.3.0
-git push origin v0.3.0
+# Typical flow: merge PR / push to main — release is created by CI
+git checkout main
+git merge james
+git push origin main
 ```
 
-Workflow: `.github/workflows/release.yml`  
-You can also run it manually via **Actions → Release → Run workflow**.
+Optional manual tag release:
+
+```powershell
+git tag v0.3.1
+git push origin v0.3.1
+```
+
+Workflow: `.github/workflows/release.yml`
 
 Repo: https://github.com/jamesguan/disable-windows-diagnostics
 
@@ -176,14 +188,25 @@ Repo: https://github.com/jamesguan/disable-windows-diagnostics
 
 ## Notes
 
+- **Renamed in v0.4.0** from “Windows Diagnostics”. First launch migrates prefs/disclaimer/history from `HKCU\Software\WindowsDiagnostics` and `%APPDATA%\WindowsDiagnostics`, then removes those legacy locations (only when they look like this app’s data). Binaries are now `tluw.exe` / `tluw-gui.exe`.
 - Does not disable Windows Update or Defender.
 - Post-update re-apply cannot catch every Microsoft reset; the logon backup helps after feature updates.
 - Windows Home may ignore some policy keys.
 - Reboot after a full lockdown is recommended.
+- GUI **Dashboard** shows telemetry ON/OFF chips and daily GB freed by log/temp clears (`tluw history`).
+- Optional **system tray** (Automation): close hides to tray; right-click for Open / Disable telemetry / Clear safe logs / Quit.
+
+## Disclaimer / liability
+
+**USE AT YOUR OWN RISK.** This software is provided **AS IS** with **NO WARRANTY**. The authors accept **NO LIABILITY** for data loss, system damage, compliance issues, or any other claim arising from its use.
+
+Full waiver (also shown on first GUI launch): [DISCLAIMER.md](DISCLAIMER.md). CLI: `tluw disclaimer`.
+
+This is not legal advice; consult an attorney if you need formal protection.
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — see [LICENSE](LICENSE).
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — see [LICENSE](LICENSE). The license’s **No Liability** section applies; [DISCLAIMER.md](DISCLAIMER.md) adds product-specific risk and indemnity language.
 
 **Personal / private and other non-commercial use only.** Commercial use is not allowed.  
 (This is source-available, not OSI “Open Source,” which requires allowing commercial use.)

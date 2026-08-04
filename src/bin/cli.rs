@@ -1,24 +1,32 @@
-//! Command-line interface for Windows Diagnostics.
+//! Command-line interface for Telemetry and Logging Utility for Windows.
 //!
-//! Thin wrapper around [`windows_diagnostics::telemetry`].
+//! Thin wrapper around [`telemetry_logging_utility::telemetry`].
 
 #![cfg(windows)]
 
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use windows_diagnostics::maintenance;
-use windows_diagnostics::system_links;
-use windows_diagnostics::telemetry::{
+use telemetry_logging_utility::cleanup_history;
+use telemetry_logging_utility::cleanup_schedule::{self, CleanupInterval, CleanupScheduleConfig};
+use telemetry_logging_utility::disclaimer;
+use telemetry_logging_utility::identity;
+use telemetry_logging_utility::log_cleanup;
+use telemetry_logging_utility::maintenance;
+use telemetry_logging_utility::system_links;
+use telemetry_logging_utility::telemetry::{
     self, apply, apply_all, ensure_elevated, read_all, read_one, SettingId,
 };
+use telemetry_logging_utility::temp_cleanup;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "windows-diagnostics",
-    about = "Inspect and toggle Windows diagnostic data / telemetry (CLI)",
-    long_about = "Core commands to disable or enable Windows diagnostic collection.\n\
-                  The GUI (windows-diagnostics-gui.exe) is optional and calls the same library."
+    name = "tluw",
+    about = "Telemetry and Logging Utility for Windows (CLI)",
+    long_about = "Inspect and toggle Windows diagnostic / telemetry settings, and clear logs/temp.\n\
+                  The GUI (tluw-gui.exe) is optional and calls the same library.\n\n\
+                  USE AT YOUR OWN RISK — AS IS, NO WARRANTY, NO LIABILITY.\n\
+                  See `tluw disclaimer` and DISCLAIMER.md."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -82,6 +90,111 @@ enum Commands {
         /// Link id, e.g. event-viewer, privacy-feedback
         id: String,
     },
+
+    /// List clearable log targets (Diagnosis folder, event logs, WER, …)
+    #[command(name = "clear-list")]
+    ClearList,
+
+    /// Open the folder / Event Viewer for a clear target (see `clear-list`)
+    #[command(name = "open-log")]
+    OpenLog {
+        id: String,
+    },
+
+    /// Clear one log target by id (see `clear-list`). Destructive; needs admin for most.
+    Clear {
+        /// Target id, e.g. diagnosis, event-application, wer
+        id: String,
+        /// Required for dangerous targets (diagnosis*, event-security)
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Clear all available log targets (add `--dangerous` for Diagnosis / Security)
+    #[command(name = "clear-all")]
+    ClearAll {
+        #[arg(long)]
+        dangerous: bool,
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// List temp-folder cleanup targets
+    #[command(name = "temp-list")]
+    TempList,
+
+    /// Open a temp location (see `temp-list`)
+    #[command(name = "open-temp")]
+    OpenTemp {
+        id: String,
+    },
+
+    /// Clear one temp target (see `temp-list`)
+    #[command(name = "clear-temp")]
+    ClearTemp {
+        id: String,
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Clear all available temp targets
+    #[command(name = "clear-temp-all")]
+    ClearTempAll {
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Print the full no-warranty / liability disclaimer
+    Disclaimer,
+
+    /// Show daily GB freed by log/temp clears (dashboard history)
+    History {
+        /// How many recent days to list (default 14)
+        #[arg(long, default_value_t = 14)]
+        days: usize,
+    },
+
+    /// Configure scheduled clearing of logs and/or temp (Task Scheduler)
+    #[command(name = "cleanup-schedule")]
+    CleanupSchedule {
+        #[command(subcommand)]
+        action: CleanupScheduleCmd,
+    },
+
+    /// Run scheduled cleanup now (Task Scheduler entry point; uses saved prefs)
+    #[command(name = "scheduled-cleanup")]
+    ScheduledCleanup,
+}
+
+#[derive(Subcommand, Debug)]
+enum CleanupScheduleCmd {
+    /// Show saved prefs and whether the scheduled task is registered
+    Status,
+
+    /// Disable all triggers and remove the scheduled task
+    Off,
+
+    /// Set what to clear and when (creates/updates Task Scheduler entry)
+    Set {
+        /// off | hourly | 6h | daily | weekly
+        #[arg(long, default_value = "off")]
+        interval: String,
+        /// Also run a few minutes after user logon
+        #[arg(long)]
+        on_logon: bool,
+        /// Also run at session end / logoff (best-effort; not true power-off)
+        #[arg(long)]
+        on_session_end: bool,
+        /// Clear safe log targets
+        #[arg(long)]
+        safe_logs: bool,
+        /// Clear all log targets including dangerous (Diagnosis / Security)
+        #[arg(long)]
+        all_logs: bool,
+        /// Clear temp folders
+        #[arg(long)]
+        temp: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -97,6 +210,8 @@ impl OnOff {
 }
 
 fn main() -> ExitCode {
+    telemetry_logging_utility::bootstrap();
+
     let cli = Cli::parse();
     let command = cli.command.unwrap_or(Commands::Status);
 
@@ -145,7 +260,19 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
             println!(
                 "post-update:    {}  (task: {})",
                 if s.post_update { "ON" } else { "OFF" },
-                maintenance::TASK_NAME
+                identity::TASK_NAME
+            );
+            let cs = cleanup_schedule::read_state();
+            println!(
+                "cleanup-sched:  {}  (task: {})",
+                if cs.config.is_active() && cs.task_registered {
+                    "ON"
+                } else if cs.config.is_active() {
+                    "prefs-only"
+                } else {
+                    "OFF"
+                },
+                identity::CLEANUP_TASK_NAME
             );
             Ok(())
         }
@@ -177,7 +304,7 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
                 println!("  {}", link.description);
             }
             println!();
-            println!("Open one: windows-diagnostics open <id>");
+            println!("Open one: tluw open <id>");
             Ok(())
         }
         Commands::Open { id } => match system_links::open_id(&id) {
@@ -187,6 +314,342 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
             }
             Err(e) => Err(e),
         },
+        Commands::ClearList => {
+            println!("{:<24} {:<6} {}", "ID", "AVAIL", "STATUS");
+            println!("{}", "-".repeat(78));
+            for a in log_cleanup::ALL {
+                let avail = if a.is_available() { "yes" } else { "no" };
+                let danger = if a.dangerous { " [dangerous]" } else { "" };
+                println!("{:<24} {:<6} {}{danger}", a.id, avail, a.title);
+                if a.is_available() {
+                    let st = log_cleanup::inspect(a);
+                    println!("  {}", st.summary_line());
+                } else {
+                    println!("  {}", a.description);
+                }
+            }
+            println!();
+            println!("Open loc:   tluw open-log <id>");
+            println!("Clear one:  tluw clear <id> --confirm");
+            println!("Clear safe: tluw clear-all --confirm");
+            Ok(())
+        }
+        Commands::OpenLog { id } => {
+            let action = log_cleanup::ClearAction::find(&id)
+                .ok_or_else(|| format!("unknown clear target '{id}' (see clear-list)"))?;
+            let status = log_cleanup::inspect(action);
+            println!("{}", status.summary_line());
+            match log_cleanup::open_location(action) {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::Clear { id, confirm } => {
+            let action = log_cleanup::ClearAction::find(&id)
+                .ok_or_else(|| format!("unknown clear target '{id}' (see clear-list)"))?;
+            if action.dangerous && !confirm {
+                return Err(format!(
+                    "'{}' is dangerous — re-run with --confirm",
+                    action.id
+                ));
+            }
+            if !confirm {
+                return Err("refusing to clear without --confirm".into());
+            }
+            require_admin(no_elevate)?;
+            match log_cleanup::clear(action) {
+                Ok(result) => {
+                    println!("{}", result.summary_line());
+                    println!("  before: {}", result.before.summary_line());
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::ClearAll {
+            dangerous,
+            confirm,
+        } => {
+            if !confirm {
+                return Err("refusing to clear-all without --confirm".into());
+            }
+            require_admin(no_elevate)?;
+            let results = log_cleanup::clear_all(dangerous);
+            let mut failed = false;
+            let mut total_files = 0u64;
+            let mut total_bytes = 0u64;
+            for (id, r) in results {
+                match r {
+                    Ok(result) => {
+                        total_files += result.removed_files;
+                        total_bytes += result.freed_bytes;
+                        println!("  OK  {id}: {}", result.summary_line());
+                    }
+                    Err(e) => {
+                        eprintln!("  FAIL {id}: {e}");
+                        failed = true;
+                    }
+                }
+            }
+            println!(
+                "\nTotal: {} item(s), {}",
+                total_files,
+                log_cleanup::format_bytes(total_bytes)
+            );
+            if failed {
+                Err("one or more clear operations failed".into())
+            } else {
+                Ok(())
+            }
+        }
+        Commands::TempList => {
+            println!("{:<18} {:<6} {}", "ID", "AVAIL", "STATUS");
+            println!("{}", "-".repeat(78));
+            for t in temp_cleanup::ALL {
+                if !t.is_available() {
+                    continue; // e.g. TMP / LocalAppData\Temp same as TEMP
+                }
+                let admin = if t.needs_admin { " [admin]" } else { "" };
+                println!("{:<18} yes    {}{admin}", t.id, t.title);
+                println!("  {}", temp_cleanup::inspect(t).summary_line());
+            }
+            println!();
+            println!("Open:  tluw open-temp <id>");
+            println!("Clear: tluw clear-temp <id> --confirm");
+            println!("All:   tluw clear-temp-all --confirm");
+            Ok(())
+        }
+        Commands::OpenTemp { id } => {
+            let target = temp_cleanup::TempTarget::find(&id)
+                .ok_or_else(|| format!("unknown temp target '{id}' (see temp-list)"))?;
+            let st = temp_cleanup::inspect(target);
+            println!("{}", st.summary_line());
+            match temp_cleanup::open_location(target) {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::ClearTemp { id, confirm } => {
+            if !confirm {
+                return Err("refusing to clear-temp without --confirm".into());
+            }
+            let target = temp_cleanup::TempTarget::find(&id)
+                .ok_or_else(|| format!("unknown temp target '{id}' (see temp-list)"))?;
+            if target.needs_admin {
+                require_admin(no_elevate)?;
+            }
+            match temp_cleanup::clear(target) {
+                Ok(result) => {
+                    println!("{}", result.summary_line());
+                    println!("  before: {}", result.before.summary_line());
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::ClearTempAll { confirm } => {
+            if !confirm {
+                return Err("refusing to clear-temp-all without --confirm".into());
+            }
+            // Elevate if any admin target is available
+            if temp_cleanup::ALL
+                .iter()
+                .any(|t| t.is_available() && t.needs_admin)
+            {
+                require_admin(no_elevate)?;
+            }
+            let results = temp_cleanup::clear_all();
+            let mut failed = false;
+            let mut total_files = 0u64;
+            let mut total_bytes = 0u64;
+            for (id, r) in results {
+                match r {
+                    Ok(result) => {
+                        total_files += result.removed_files;
+                        total_bytes += result.freed_bytes;
+                        println!("  OK  {id}: {}", result.summary_line());
+                    }
+                    Err(e) => {
+                        eprintln!("  FAIL {id}: {e}");
+                        failed = true;
+                    }
+                }
+            }
+            println!(
+                "\nTotal: {} item(s), {}",
+                total_files,
+                log_cleanup::format_bytes(total_bytes)
+            );
+            if failed {
+                Err("one or more temp clear operations failed".into())
+            } else {
+                Ok(())
+            }
+        }
+        Commands::Disclaimer => {
+            println!("{}", disclaimer::FULL);
+            match disclaimer::accept("cli") {
+                Ok(rec) => {
+                    println!();
+                    println!(
+                        "Recorded local acceptance at {} (user={}, computer={}, v{}).",
+                        rec.accepted_at, rec.user, rec.computer, rec.version
+                    );
+                    println!(
+                        "Stored in HKCU\\Software\\TelemetryLoggingUtility\\Disclaimer \
+                         (+ %APPDATA%\\TelemetryLoggingUtility backup). Not wiped by TEMP/log clears. Not uploaded."
+                    );
+                }
+                Err(e) => eprintln!("Could not save acceptance record: {e}"),
+            }
+            Ok(())
+        }
+        Commands::History { days } => {
+            let days = days.clamp(1, 90);
+            let rows = cleanup_history::daily_totals(days);
+            let (life_logs, life_temp) = cleanup_history::lifetime_totals();
+            println!(
+                "Lifetime freed — logs {} · temp {} · total {}",
+                cleanup_history::format_size(life_logs),
+                cleanup_history::format_size(life_temp),
+                cleanup_history::format_size(life_logs.saturating_add(life_temp))
+            );
+            println!();
+            println!("{:<12} {:>10} {:>10} {:>10}", "DATE", "LOGS", "TEMP", "TOTAL");
+            println!("{}", "-".repeat(46));
+            for d in rows {
+                println!(
+                    "{:<12} {:>10} {:>10} {:>10}",
+                    d.date,
+                    cleanup_history::format_size(d.logs_bytes),
+                    cleanup_history::format_size(d.temp_bytes),
+                    cleanup_history::format_size(d.total_bytes())
+                );
+            }
+            Ok(())
+        }
+        Commands::CleanupSchedule { action } => cmd_cleanup_schedule(action, no_elevate),
+        Commands::ScheduledCleanup => {
+            // Task Scheduler entry: already elevated via HighestAvailable when possible.
+            match cleanup_schedule::run_now() {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+    }
+}
+
+fn cmd_cleanup_schedule(action: CleanupScheduleCmd, no_elevate: bool) -> Result<(), String> {
+    match action {
+        CleanupScheduleCmd::Status => {
+            let st = cleanup_schedule::read_state();
+            let cfg = &st.config;
+            println!("{}", cfg.summary_line());
+            println!(
+                "task registered: {}  ({})",
+                if st.task_registered { "yes" } else { "no" },
+                identity::CLEANUP_TASK_NAME
+            );
+            println!(
+                "targets: safe-logs={}  all-logs={}  temp={}",
+                on_off(cfg.clear_safe_logs),
+                on_off(cfg.clear_all_logs),
+                on_off(cfg.clear_temp)
+            );
+            println!(
+                "when:    interval={}  on-logon={}  on-session-end={}",
+                cfg.interval.as_str(),
+                on_off(cfg.on_logon),
+                on_off(cfg.on_session_end)
+            );
+            if let Some(next) = st.next_interval.as_ref() {
+                println!("{next}");
+            }
+            if let Some(sched) = st.scheduler_next.as_ref() {
+                println!("Task Scheduler next run: {sched}");
+            }
+            println!();
+            println!("Scheduled runs (`tluw scheduled-cleanup`) clear without confirmation.");
+            println!("Note: on-session-end is best-effort at logoff/disconnect.");
+            println!("      True power-off shutdown is not reliably hookable for user tasks.");
+            Ok(())
+        }
+        CleanupScheduleCmd::Off => {
+            require_admin(no_elevate)?;
+            match cleanup_schedule::disable() {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        CleanupScheduleCmd::Set {
+            interval,
+            on_logon,
+            on_session_end,
+            safe_logs,
+            all_logs,
+            temp,
+        } => {
+            require_admin(no_elevate)?;
+            let interval = CleanupInterval::from_str(&interval);
+            // If the user named no targets, keep previous prefs (or defaults).
+            let prev = cleanup_schedule::load_config();
+            let any_target_flag = safe_logs || all_logs || temp;
+            let cfg = CleanupScheduleConfig {
+                clear_safe_logs: if any_target_flag {
+                    safe_logs || all_logs
+                } else {
+                    prev.clear_safe_logs
+                },
+                clear_all_logs: if any_target_flag {
+                    all_logs
+                } else {
+                    prev.clear_all_logs
+                },
+                clear_temp: if any_target_flag { temp } else { prev.clear_temp },
+                on_logon,
+                on_session_end,
+                interval,
+            };
+            if !cfg.has_any_trigger() {
+                return Err(
+                    "specify at least one trigger: --interval hourly|6h|daily|weekly and/or --on-logon and/or --on-session-end"
+                        .into(),
+                );
+            }
+            if !cfg.has_any_target() {
+                return Err(
+                    "nothing to clear — pass --safe-logs and/or --all-logs and/or --temp (or set targets first)"
+                        .into(),
+                );
+            }
+            match cleanup_schedule::apply(&cfg) {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+    }
+}
+
+fn on_off(v: bool) -> &'static str {
+    if v {
+        "ON"
+    } else {
+        "OFF"
     }
 }
 
@@ -226,7 +689,7 @@ fn cmd_status() -> Result<(), String> {
     }
     println!();
     println!("OFF = blocked/privacy   ON = collecting/allowed");
-    println!("Tip: windows-diagnostics disable | enable | set <id> on|off");
+    println!("Tip: tluw disable | enable | set <id> on|off");
     Ok(())
 }
 

@@ -1,28 +1,53 @@
-//! Shared library for Windows diagnostic / telemetry controls.
+//! Shared library for Telemetry and Logging Utility for Windows.
 //!
 //! Layout:
+//! - [`identity`] — product name, registry/APPDATA paths, legacy migration
 //! - [`telemetry`] — core read/apply API (CLI + GUI)
-//! - [`system_links`] — open Event Viewer / Settings / log folders (CLI + GUI)
-//! - [`gui`] — egui app (feature `gui` only); thin UI over library APIs
+//! - [`log_cleanup`] — wipe Diagnosis / event logs / WER / CBS (CLI + GUI)
+//! - [`temp_cleanup`] — clear TEMP / Windows\\Temp / Prefetch (CLI + GUI)
+//! - [`cleanup_history`] — daily GB freed by clears (dashboard / CLI)
+//! - [`cleanup_schedule`] — Task Scheduler: interval / logon / session-end clears
+//! - [`single_instance`] — one GUI process; later starts focus the existing window
+//! - [`prefs`] — GUI preferences (system tray, theme, …)
+//! - [`disclaimer`] — no-warranty / liability text + acceptance marker
+//! - [`gui`] — iced app (feature `gui` only); thin UI over library APIs
 //!
 //! Binaries (independent):
-//! - `windows-diagnostics` — CLI
-//! - `windows-diagnostics-gui` — GUI helper on top of the same API
+//! - `tluw` — CLI
+//! - `tluw-gui` — GUI helper on top of the same API
 //!
 //! Prefer extending the library (+ CLI) first; the GUI should call those APIs,
 //! not reimplement registry/service/task logic.
 
 #![cfg(windows)]
 
+pub mod cleanup_history;
+pub mod cleanup_schedule;
+pub mod disclaimer;
+pub mod identity;
+pub mod log_cleanup;
 pub mod maintenance;
+pub mod prefs;
+pub mod single_instance;
 pub mod system_links;
 pub mod telemetry;
+pub mod temp_cleanup;
 mod win_cmd;
 
 #[cfg(feature = "gui")]
+pub mod app_icon;
+#[cfg(feature = "gui")]
 pub mod gui;
+#[cfg(feature = "gui")]
+pub mod tray;
 
 pub use telemetry::{
     apply, apply_all, ensure_elevated, is_elevated, read_all, read_one, relaunch_elevated,
     relaunch_elevated_with_args, SettingId, SettingState,
 };
+
+/// One-time identity migration (registry, APPDATA, Run key, scheduled task).
+pub fn bootstrap() {
+    identity::ensure_migrated();
+    maintenance::migrate_legacy_post_update();
+}

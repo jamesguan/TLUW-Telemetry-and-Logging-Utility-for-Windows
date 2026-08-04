@@ -9,9 +9,9 @@ alwaysApply: true
 
 | Layer | Location | Role |
 |-------|----------|------|
-| Library | `src/telemetry.rs`, `src/maintenance.rs` | Core logic: read/apply settings, elevation, startup/post-update |
+| Library | `src/telemetry.rs`, `src/maintenance.rs`, `src/log_cleanup.rs`, `src/temp_cleanup.rs`, `src/cleanup_history.rs`, `src/prefs.rs` | Core logic |
 | CLI | `src/bin/cli.rs` → `windows-diagnostics` | Exposes commands over the library |
-| GUI | `src/gui.rs` + `src/bin/gui.rs` → `windows-diagnostics-gui` | Thin UI; calls the same library APIs |
+| GUI | `src/gui.rs` + `src/tray.rs` + `src/bin/gui.rs` → `windows-diagnostics-gui` | Thin UI; calls the same library APIs |
 
 Both binaries are independently runnable (`cli` / `gui` features). Shared helpers (e.g. hidden Windows subprocesses) live in the library (`win_cmd`).
 
@@ -29,6 +29,10 @@ GUI actions should map to the same library operations as CLI:
 - disable / enable / set → `apply` / `apply_all`
 - startup / post-update / integration → `maintenance::*`
 - logs / open → `system_links::*` (Event Viewer, Settings diagnostics pages, log folders, …)
+- clear / clear-all → `log_cleanup::*` (Diagnosis folder, event logs, WER, CBS, …)
+- temp-list / clear-temp → `temp_cleanup::*` (TEMP, Windows\\Temp, Prefetch, …)
+- history → `cleanup_history::*` (daily GB freed; also drives GUI dashboard)
+- tray preference → `prefs::*` (HKCU); tray UI → `tray::*` (GUI-only)
 
 ## Do / don't
 

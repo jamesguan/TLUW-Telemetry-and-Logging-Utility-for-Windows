@@ -41,6 +41,19 @@ impl SettingId {
         }
     }
 
+    /// Compact label for dashboard chips.
+    pub fn short_title(self) -> &'static str {
+        match self {
+            Self::DiagnosticData => "Diagnostic data",
+            Self::DiagTrack => "DiagTrack",
+            Self::CeipTasks => "CEIP tasks",
+            Self::AdvertisingId => "Advertising ID",
+            Self::TailoredExperiences => "Tailored experiences",
+            Self::CeipPolicy => "CEIP policy",
+            Self::AppInventory => "App inventory",
+        }
+    }
+
     pub fn explanation(self) -> &'static str {
         match self {
             Self::DiagnosticData => {

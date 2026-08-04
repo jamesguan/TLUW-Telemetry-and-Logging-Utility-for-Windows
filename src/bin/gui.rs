@@ -3,34 +3,31 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![cfg(windows)]
 
-use eframe::egui;
-use windows_diagnostics::gui::DiagnosticsApp;
-use windows_diagnostics::telemetry;
+use telemetry_logging_utility::single_instance;
+use telemetry_logging_utility::telemetry;
 
-fn main() -> eframe::Result<()> {
+fn main() -> iced::Result {
+    telemetry_logging_utility::bootstrap();
+
+    // Already running (window may be hidden in the tray) — just focus it.
+    if single_instance::activate_existing() {
+        return Ok(());
+    }
+
     if !telemetry::is_elevated() {
-        // Auto-elevate; if user cancels UAC, still open GUI with a prompt.
+        // Don't spawn a second elevated copy if the first is still coming up.
+        if single_instance::activate_existing_with_retry() {
+            return Ok(());
+        }
         if telemetry::relaunch_elevated().is_ok() {
             return Ok(());
         }
     }
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([720.0, 780.0])
-            .with_min_inner_size([560.0, 480.0])
-            .with_title("Windows Diagnostics"),
-        ..Default::default()
+    let Some(_guard) = single_instance::try_acquire() else {
+        let _ = single_instance::activate_existing_with_retry();
+        return Ok(());
     };
 
-    eframe::run_native(
-        "Windows Diagnostics",
-        options,
-        Box::new(|cc| {
-            let mut style = (*cc.egui_ctx.style()).clone();
-            style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-            cc.egui_ctx.set_style(style);
-            Ok(Box::new(DiagnosticsApp::default()))
-        }),
-    )
+    telemetry_logging_utility::gui::run()
 }

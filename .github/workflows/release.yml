@@ -1,18 +1,26 @@
 name: Release
 
+# Automatic release on every merge/push to main.
+# Also still supports version tags (v*) and manual runs.
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Version tag to build (e.g. v0.3.0). Leave empty to use cargo version."
+        description: "Optional explicit tag (e.g. v0.3.1). Leave empty to auto-generate."
         required: false
         default: ""
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   windows-msi:
@@ -20,6 +28,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -62,29 +72,52 @@ jobs:
           "name=$($msi.Name)" >> $env:GITHUB_OUTPUT
           Get-Item $msi.FullName | Format-List FullName, Length
 
-      - name: Resolve tag name
+      - name: Resolve release tag
         id: tag
         shell: pwsh
         run: |
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $sha = $env:GITHUB_SHA.Substring(0, 7)
+          $run = $env:GITHUB_RUN_NUMBER
+
           if ($env:GITHUB_REF_TYPE -eq "tag") {
-            "name=$env:GITHUB_REF_NAME" >> $env:GITHUB_OUTPUT
+            $name = $env:GITHUB_REF_NAME
+            $title = "Telemetry Logging Utility $name"
           } elseif ("${{ github.event.inputs.tag }}" -ne "") {
-            "name=${{ github.event.inputs.tag }}" >> $env:GITHUB_OUTPUT
+            $name = "${{ github.event.inputs.tag }}"
+            $title = "Telemetry Logging Utility $name"
+          } elseif ($env:GITHUB_REF_NAME -eq "main") {
+            # Unique per merge/push to main so releases never collide
+            $name = "v$ver-build.$run"
+            $title = "Telemetry Logging Utility v$ver (build $run)"
           } else {
-            $ver = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-            "name=v$ver" >> $env:GITHUB_OUTPUT
+            $name = "v$ver-build.$run+$sha"
+            $title = "Telemetry Logging Utility v$ver (build $run)"
           }
+
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "title=$title" >> $env:GITHUB_OUTPUT
+          "cargo_version=$ver" >> $env:GITHUB_OUTPUT
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+          Write-Host "Release tag: $name"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
-          name: Windows Diagnostics ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.title }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
+          make_latest: true
+          body: |
+            Automated release from `${{ github.ref_name }}` (`${{ steps.tag.outputs.sha }}`).
+
+            - Cargo version: `${{ steps.tag.outputs.cargo_version }}`
+            - MSI + CLI (`tluw.exe`) + GUI (`tluw-gui.exe`)
           files: |
             ${{ steps.msi.outputs.path }}
-            target/release/windows-diagnostics.exe
-            target/release/windows-diagnostics-gui.exe
+            target/release/tluw.exe
+            target/release/tluw-gui.exe
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
