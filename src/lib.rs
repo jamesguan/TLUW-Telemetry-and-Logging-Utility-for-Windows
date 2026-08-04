@@ -2,15 +2,22 @@
 //!
 //! Layout:
 //! - [`telemetry`] — core read/apply API (CLI + GUI)
-//! - [`gui`] — egui app (feature `gui` only)
+//! - [`system_links`] — open Event Viewer / Settings / log folders (CLI + GUI)
+//! - [`gui`] — egui app (feature `gui` only); thin UI over library APIs
 //!
-//! Binaries:
+//! Binaries (independent):
 //! - `windows-diagnostics` — CLI
 //! - `windows-diagnostics-gui` — GUI helper on top of the same API
+//!
+//! Prefer extending the library (+ CLI) first; the GUI should call those APIs,
+//! not reimplement registry/service/task logic.
 
 #![cfg(windows)]
 
+pub mod maintenance;
+pub mod system_links;
 pub mod telemetry;
+mod win_cmd;
 
 #[cfg(feature = "gui")]
 pub mod gui;

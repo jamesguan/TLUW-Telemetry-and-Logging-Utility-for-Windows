@@ -1,8 +1,10 @@
 //! Read and write Windows diagnostic / telemetry settings.
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use winreg::enums::*;
 use winreg::RegKey;
+
+use crate::win_cmd;
 
 /// Stable id for each controllable setting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -142,7 +144,7 @@ pub struct SettingState {
 }
 
 pub fn is_elevated() -> bool {
-    Command::new("net")
+    win_cmd::command("net")
         .arg("session")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -178,7 +180,7 @@ fn relaunch_elevated_inner(args: &[String], wait: bool) -> Result<(), String> {
 
     let wait_flag = if wait { " -Wait" } else { "" };
 
-    let status = Command::new("powershell")
+    let status = win_cmd::command("powershell")
         .args([
             "-NoProfile",
             "-WindowStyle",
@@ -290,12 +292,14 @@ fn set_diagnostic_data(active: bool) -> Result<String, String> {
 }
 
 fn read_diagtrack() -> SettingState {
-    let output = Command::new("sc.exe").args(["qc", "DiagTrack"]).output();
+    let output = win_cmd::command("sc.exe")
+        .args(["qc", "DiagTrack"])
+        .output();
     let text = output
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
     let disabled = text.to_ascii_lowercase().contains("disabled");
-    let running = Command::new("sc.exe")
+    let running = win_cmd::command("sc.exe")
         .args(["query", "DiagTrack"])
         .output()
         .map(|o| {
@@ -322,26 +326,26 @@ fn read_diagtrack() -> SettingState {
 
 fn set_diagtrack(active: bool) -> Result<String, String> {
     if active {
-        let config = Command::new("sc.exe")
+        let config = win_cmd::command("sc.exe")
             .args(["config", "DiagTrack", "start=", "auto"])
             .output()
             .map_err(|e| e.to_string())?;
         if !config.status.success() {
             return Err(sc_err(&config));
         }
-        let _ = Command::new("sc.exe")
+        let _ = win_cmd::command("sc.exe")
             .args(["start", "DiagTrack"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
         Ok("DiagTrack set to Automatic and start requested".into())
     } else {
-        let _ = Command::new("sc.exe")
+        let _ = win_cmd::command("sc.exe")
             .args(["stop", "DiagTrack"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
-        let config = Command::new("sc.exe")
+        let config = win_cmd::command("sc.exe")
             .args(["config", "DiagTrack", "start=", "disabled"])
             .output()
             .map_err(|e| e.to_string())?;
@@ -375,27 +379,23 @@ const CEIP_TASKS: &[&str] = &[
 ];
 
 fn task_enabled(path: &str) -> Option<bool> {
-    let output = Command::new("schtasks.exe")
-        .args(["/Query", "/TN", path, "/FO", "LIST", "/V"])
+    // LIST without /V is enough (Status line) and lighter than verbose queries.
+    let output = win_cmd::command("schtasks.exe")
+        .args(["/Query", "/TN", path, "/FO", "LIST"])
         .output()
         .ok()?;
     if !output.status.success() {
         return None;
     }
     let text = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    if text.contains("status:") && text.contains("disabled") {
-        Some(false)
-    } else if text.contains("scheduled task state:") {
-        // English locales: "Scheduled Task State:    Enabled/Disabled"
-        if text.contains("scheduled task state:") && text.contains("disabled") {
-            Some(false)
-        } else {
-            Some(true)
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with("status:") {
+            return Some(!line.contains("disabled"));
         }
-    } else {
-        // Fallback: treat existing task as enabled unless "disabled" appears near state
-        Some(!text.contains("disabled"))
     }
+    // Fallback if locale layout differs
+    Some(!text.contains("disabled"))
 }
 
 fn read_ceip_tasks() -> SettingState {
@@ -421,7 +421,7 @@ fn set_ceip_tasks(active: bool) -> Result<String, String> {
     let mut changed = 0usize;
     let mut missing = 0usize;
     for t in CEIP_TASKS {
-        let output = Command::new("schtasks.exe")
+        let output = win_cmd::command("schtasks.exe")
             .args(["/Change", "/TN", t, flag])
             .output()
             .map_err(|e| e.to_string())?;

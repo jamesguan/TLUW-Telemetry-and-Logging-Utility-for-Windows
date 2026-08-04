@@ -3,11 +3,13 @@ name = "windows-diagnostics"
 version = "0.3.0"
 edition = "2021"
 description = "CLI and GUI tools to inspect and toggle Windows diagnostic data / telemetry"
-license = "MIT"
+license = "PolyForm-Noncommercial-1.0.0"
 readme = "README.md"
+authors = ["James Guan"]
+homepage = "https://github.com/jamesguan/disable-windows-diagnostics"
+repository = "https://github.com/jamesguan/disable-windows-diagnostics"
 keywords = ["windows", "telemetry", "privacy", "diagnostics", "cli"]
 categories = ["command-line-utilities", "gui"]
-# repository = "https://github.com/YOUR_USER/windows-diagnostics"
 
 [lib]
 name = "windows_diagnostics"
@@ -39,3 +41,13 @@ lto = true
 codegen-units = 1
 strip = true
 opt-level = "z"
+
+[package.metadata.wix]
+# MSI name / product
+name = "Windows Diagnostics"
+# Include both binaries via custom wix/main.wxs
+eula = false
+license = false
+product-icon = false
+# Path where MSI is written (relative to target/)
+include = []

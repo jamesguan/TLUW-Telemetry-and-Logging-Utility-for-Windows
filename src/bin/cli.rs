@@ -7,6 +7,8 @@
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use windows_diagnostics::maintenance;
+use windows_diagnostics::system_links;
 use windows_diagnostics::telemetry::{
     self, apply, apply_all, ensure_elevated, read_all, read_one, SettingId,
 };
@@ -55,6 +57,30 @@ enum Commands {
         setting: String,
         /// on = collecting allowed, off = blocked
         state: OnOff,
+    },
+
+    /// Show startup / post-update integration status
+    Integration,
+
+    /// Enable or disable run-at-startup (GUI at logon)
+    Startup {
+        state: OnOff,
+    },
+
+    /// Enable or disable re-apply after Windows Update (scheduled task)
+    #[command(name = "post-update")]
+    PostUpdate {
+        state: OnOff,
+    },
+
+    /// List Windows logging / diagnostics tools this app can open
+    #[command(name = "logs", alias = "links")]
+    Logs,
+
+    /// Open a Windows logging tool by id (see `logs`)
+    Open {
+        /// Link id, e.g. event-viewer, privacy-feedback
+        id: String,
     },
 }
 
@@ -110,6 +136,57 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
                 Err(e) => Err(e),
             }
         }
+        Commands::Integration => {
+            let s = maintenance::read_integration();
+            println!(
+                "run-at-startup: {}",
+                if s.run_at_startup { "ON" } else { "OFF" }
+            );
+            println!(
+                "post-update:    {}  (task: {})",
+                if s.post_update { "ON" } else { "OFF" },
+                maintenance::TASK_NAME
+            );
+            Ok(())
+        }
+        Commands::Startup { state } => {
+            // HKCU Run does not need admin
+            match maintenance::set_run_at_startup(state.active()) {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::PostUpdate { state } => {
+            require_admin(no_elevate)?;
+            match maintenance::set_post_update_task(state.active()) {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::Logs => {
+            println!("{:<22} {}", "ID", "TITLE");
+            println!("{}", "-".repeat(72));
+            for link in system_links::ALL {
+                println!("{:<22} {}", link.id, link.title);
+                println!("  {}", link.description);
+            }
+            println!();
+            println!("Open one: windows-diagnostics open <id>");
+            Ok(())
+        }
+        Commands::Open { id } => match system_links::open_id(&id) {
+            Ok(msg) => {
+                println!("{msg}");
+                Ok(())
+            }
+            Err(e) => Err(e),
+        },
     }
 }
 

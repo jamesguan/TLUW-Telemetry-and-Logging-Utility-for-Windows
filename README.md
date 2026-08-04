@@ -2,176 +2,161 @@
 
 Modular Rust tools to inspect and toggle Windows diagnostic data / telemetry.
 
-| Binary | Role |
-|--------|------|
-| `windows-diagnostics.exe` | **CLI** — scripts, terminals, one-shot commands |
-| `windows-diagnostics-gui.exe` | **GUI** — same library, toggles + **Verify status** |
+| Artifact | Role |
+|----------|------|
+| `windows-diagnostics.exe` | **CLI** |
+| `windows-diagnostics-gui.exe` | **GUI** |
+| `Windows Diagnostics-*.msi` | **Installer** (desktop shortcut, optional startup + post-update) |
 
-Both call `windows_diagnostics::telemetry`. The GUI does not reimplement policy logic.
+**Modularity:** core logic lives in the library (`telemetry`, `maintenance`). The CLI exposes commands; the GUI is a thin front-end over the same APIs (status, disable, enable, set, startup, post-update, integration). Prefer extending the library + CLI first; keep both binaries independently runnable.
 
 ```text
 src/
-  lib.rs              shared crate root
-  telemetry.rs        read / apply settings (core)
-  gui.rs              egui UI (feature = gui)
-  bin/cli.rs          CLI entry
-  bin/gui.rs          GUI entry
+  lib.rs / telemetry.rs / maintenance.rs / gui.rs
+  bin/cli.rs
+  bin/gui.rs
+wix/main.wxs                  MSI definition (cargo-wix)
+.github/workflows/release.yml Tag → build MSI → GitHub Release
 ```
 
 ---
 
-## How to build
+## Install (end users)
 
-Requires [Rust](https://rustup.rs/) on Windows 10/11.
+1. Download the `.msi` from [GitHub Releases](https://github.com/jamesguan/disable-windows-diagnostics/releases).
+2. Run the installer (Administrator).
+3. On the feature page you can enable:
+   - **Desktop shortcut** (on by default)
+   - **Add to PATH** (on by default)
+   - **Run when Windows starts** (off by default) — Startup-folder shortcut to the GUI
+   - **Re-apply after Windows Update** (off by default) — scheduled task on WU Event ID 19 + logon backup that runs `windows-diagnostics disable`
+
+You can also toggle startup / post-update later in the GUI (**Automation**) or via CLI:
+
+```powershell
+windows-diagnostics startup on
+windows-diagnostics post-update on
+windows-diagnostics integration
+```
+
+---
+
+## How to build (developers)
+
+Requires [Rust](https://rustup.rs/).
 
 ```powershell
 cd C:\Users\Garuda\Projects\windows-diagnostics
 cargo build --release
-# or
-.\build.ps1
 ```
 
 Outputs:
 
 ```text
-target\release\windows-diagnostics.exe        # CLI
-target\release\windows-diagnostics-gui.exe    # GUI
+target\release\windows-diagnostics.exe
+target\release\windows-diagnostics-gui.exe
 ```
 
-### Features
+### Build the MSI installer (`cargo wix`)
 
-| Feature | Default | Provides |
-|---------|---------|----------|
-| `cli` | yes | `windows-diagnostics` + clap |
-| `gui` | yes | `windows-diagnostics-gui` + egui |
-
-CLI-only:
+WiX Toolset binaries are downloaded once into `tools\wix` (gitignored):
 
 ```powershell
-cargo build --release --no-default-features --features cli
+.\build-msi.ps1
 ```
+
+Or manually:
+
+```powershell
+# One-time: install cargo-wix + WiX binaries (see build-msi.ps1)
+cargo install cargo-wix --locked
+cargo build --release
+cargo wix --no-build --bin-path .\tools\wix
+```
+
+MSI output: `target\wix\`. `build-msi.ps1` uses `target-msi\` so a running GUI does not lock `target\release\*.exe`.
+
+Installer options (feature tree):
+
+| Feature | Default | Effect |
+|---------|---------|--------|
+| Desktop shortcut | On | Shortcut to GUI on Desktop |
+| Add to PATH | On | `bin` on system PATH |
+| Run when Windows starts | Off | Startup folder → GUI |
+| Re-apply after Windows Update | Off | Task `WindowsDiagnosticsPostUpdate` |
+
+**Post-update behavior:** listens for Microsoft Windows Update Client **Event ID 19** (successful install), waits 2 minutes, then runs `windows-diagnostics disable --no-elevate`. A **logon** trigger is also registered as a backup when the event is missed (common after large feature updates).
 
 ---
 
 ## How to run
 
-### CLI
-
-Open PowerShell in the project folder (or use the full path to the exe):
-
-```powershell
-cd C:\Users\Garuda\Projects\windows-diagnostics
-
-# Show live ON/OFF + raw values (no admin needed for most reads)
-.\target\release\windows-diagnostics.exe status
-
-# Same as status (default when no subcommand)
-.\target\release\windows-diagnostics.exe
-
-# One-shot lockdown — all OFF (UAC prompt)
-.\target\release\windows-diagnostics.exe disable
-
-# Re-enable all (Basic diagnostic level where applicable)
-.\target\release\windows-diagnostics.exe enable
-
-# Toggle one field
-.\target\release\windows-diagnostics.exe set diagtrack off
-.\target\release\windows-diagnostics.exe set diagnostic-data on
-
-# Help / docs
-.\target\release\windows-diagnostics.exe --help
-.\target\release\windows-diagnostics.exe list
-.\target\release\windows-diagnostics.exe explain
-.\target\release\windows-diagnostics.exe explain ceip-tasks
-```
-
-Mutating commands (`disable` / `enable` / `set`) request Administrator via UAC unless you pass `--no-elevate`.
-
 ### GUI
 
 ```powershell
 .\target\release\windows-diagnostics-gui.exe
+# or after install:
+# & "${env:ProgramFiles}\Windows Diagnostics\bin\windows-diagnostics-gui.exe"
 ```
 
-Or use the **Windows Diagnostics** desktop shortcut.
+### CLI
 
-1. Accept the UAC prompt (needed to change settings; Verify still works read-only without it).
-2. Click **Verify status** — re-reads every registry key, service, and task and shows a **Verified values** table (setting id, ON/OFF, live value, where it lives).
-3. Each card also has a per-field **Verify** button and a **Value:** line with the current reading.
-4. Use **ON/OFF** on a card, or **Turn all OFF / ON**, then click **Verify status** again to confirm the new values stuck.
+```powershell
+.\target\release\windows-diagnostics.exe status
+.\target\release\windows-diagnostics.exe disable
+.\target\release\windows-diagnostics.exe set diagtrack off
+.\target\release\windows-diagnostics.exe explain diagnostic-data
+.\target\release\windows-diagnostics.exe startup on
+.\target\release\windows-diagnostics.exe post-update on
+.\target\release\windows-diagnostics.exe integration
+
+# Windows logs / tools (same buttons as GUI)
+.\target\release\windows-diagnostics.exe logs
+.\target\release\windows-diagnostics.exe open event-viewer
+.\target\release\windows-diagnostics.exe open privacy-feedback
+```
 
 ---
 
 ## How to test
 
-### 1. Smoke-test the CLI (no changes)
-
 ```powershell
-cd C:\Users\Garuda\Projects\windows-diagnostics
 cargo build --release
-.\target\release\windows-diagnostics.exe list
 .\target\release\windows-diagnostics.exe status
-.\target\release\windows-diagnostics.exe explain diagnostic-data
-```
-
-You should see seven settings with `ON`/`OFF` and a detail string (e.g. `AllowTelemetry = 1`).
-
-### 2. Change one setting and verify
-
-```powershell
-# Before
-.\target\release\windows-diagnostics.exe status
-
-# Turn DiagTrack off (UAC)
 .\target\release\windows-diagnostics.exe set diagtrack off
-
-# After — expect diagtrack STATE = OFF, note mentions Disabled
 .\target\release\windows-diagnostics.exe status
+
+# GUI: Verify status → change toggles → Verify status again
+.\target\release\windows-diagnostics-gui.exe
+
+# Installer locally
+.\build-msi.ps1
+# Run the MSI, confirm Desktop shortcut, optional features, then:
+windows-diagnostics status
+windows-diagnostics integration
+schtasks /Query /TN WindowsDiagnosticsPostUpdate
 ```
 
-Optional cross-check with Windows itself:
+---
+
+## GitHub Releases (automatic)
+
+Pushing a version tag builds the MSI and publishes a GitHub Release (binaries + MSI):
 
 ```powershell
-sc.exe qc DiagTrack
-# START_TYPE should be DISABLED (4) after "set diagtrack off"
+git add -A
+git commit -m "Prepare release"
+git push origin HEAD
+
+# Tag must match Cargo.toml version (example 0.3.0)
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
-### 3. Full lockdown + verify
+Workflow: `.github/workflows/release.yml`  
+You can also run it manually via **Actions → Release → Run workflow**.
 
-```powershell
-.\target\release\windows-diagnostics.exe disable
-.\target\release\windows-diagnostics.exe status
-```
-
-Expect most rows `OFF`. Then:
-
-```powershell
-.\target\release\windows-diagnostics.exe enable
-.\target\release\windows-diagnostics.exe status
-```
-
-### 4. Test the GUI verify flow
-
-1. Run `.\target\release\windows-diagnostics-gui.exe` and allow UAC.
-2. Click **Verify status** — the table should match `windows-diagnostics status`.
-3. Click **Turn all OFF**, then **Verify status** again — rows should flip toward `OFF` with updated live values.
-4. Click a card’s **Verify** — footer should show that field’s live value; the table updates.
-5. Toggle one card ON/OFF, **Verify status** — that row’s value should match.
-
-### 5. Independent registry / service checks (optional)
-
-```powershell
-# Diagnostic data policy
-Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' -Name AllowTelemetry -ErrorAction SilentlyContinue
-
-# Advertising ID (current user)
-Get-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo' -Name Enabled
-
-# DiagTrack
-Get-Service DiagTrack | Format-List Name, Status, StartType
-```
-
-These should agree with **Verify status** / `windows-diagnostics status`.
+Repo: https://github.com/jamesguan/disable-windows-diagnostics
 
 ---
 
@@ -189,23 +174,16 @@ These should agree with **Verify status** / `windows-diagnostics status`.
 
 ---
 
-## Requirements
-
-- Windows 10/11 (**Pro** recommended — Home may ignore some policy keys)
-- Administrator for changes
-
 ## Notes
 
 - Does not disable Windows Update or Defender.
-- Feature updates may re-enable tasks — run `disable` or **Verify status** after big upgrades.
-- A reboot is recommended after a full lockdown so service/policy state is consistent.
-
-## Publish
-
-```powershell
-gh repo create windows-diagnostics --public --source=. --remote=origin --push
-```
+- Post-update re-apply cannot catch every Microsoft reset; the logon backup helps after feature updates.
+- Windows Home may ignore some policy keys.
+- Reboot after a full lockdown is recommended.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — see [LICENSE](LICENSE).
+
+**Personal / private and other non-commercial use only.** Commercial use is not allowed.  
+(This is source-available, not OSI “Open Source,” which requires allowing commercial use.)

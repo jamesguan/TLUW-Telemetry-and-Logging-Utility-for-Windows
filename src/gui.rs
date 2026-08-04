@@ -1,5 +1,7 @@
 //! Optional egui front-end. Enabled with the `gui` feature.
 
+use crate::maintenance::{self, IntegrationState};
+use crate::system_links;
 use crate::telemetry::{self, SettingId, SettingState};
 use eframe::egui::{self, Color32, RichText, Sense, Ui};
 
@@ -13,6 +15,7 @@ pub struct DiagnosticsApp {
     /// When true, show the live verification table of raw values.
     show_verify: bool,
     verify_stamp: String,
+    integration: IntegrationState,
 }
 
 enum Pending {
@@ -20,6 +23,8 @@ enum Pending {
     All { active: bool },
     /// Re-read system values and open the verify panel.
     Verify,
+    SetStartup(bool),
+    SetPostUpdate(bool),
 }
 
 impl Default for DiagnosticsApp {
@@ -41,6 +46,7 @@ impl Default for DiagnosticsApp {
             pending: None,
             show_verify: false,
             verify_stamp: String::new(),
+            integration: maintenance::read_integration(),
         }
     }
 }
@@ -163,6 +169,12 @@ impl eframe::App for DiagnosticsApp {
 
             ui.add_space(8.0);
 
+            self.draw_integration_row(ui);
+            ui.add_space(8.0);
+
+            self.draw_system_links_row(ui);
+            ui.add_space(8.0);
+
             if self.show_verify {
                 self.draw_verify_panel(ui);
                 ui.add_space(10.0);
@@ -189,7 +201,7 @@ impl DiagnosticsApp {
         self.refresh();
         let off = self.settings.iter().filter(|s| !s.active).count();
         let on = self.settings.iter().filter(|s| s.active).count();
-        self.verify_stamp = chrono_stamp();
+        self.verify_stamp = crate::win_cmd::local_stamp();
         self.show_verify = true;
         self.status = format!(
             "Verified at {} — {off} OFF (blocked), {on} ON (collecting). Values below are live from the system.",
@@ -202,7 +214,36 @@ impl DiagnosticsApp {
         match pending {
             Pending::Verify => {
                 self.run_verify();
+                self.integration = maintenance::read_integration();
                 return;
+            }
+            Pending::SetStartup(enabled) => match maintenance::set_run_at_startup(enabled) {
+                Ok(msg) => {
+                    self.status = msg;
+                    self.status_ok = true;
+                }
+                Err(e) => {
+                    self.status = format!("Startup option failed: {e}");
+                    self.status_ok = false;
+                }
+            },
+            Pending::SetPostUpdate(enabled) => {
+                if !self.elevated {
+                    self.status =
+                        "Administrator required to create the post-update scheduled task.".into();
+                    self.status_ok = false;
+                    return;
+                }
+                match maintenance::set_post_update_task(enabled) {
+                    Ok(msg) => {
+                        self.status = msg;
+                        self.status_ok = true;
+                    }
+                    Err(e) => {
+                        self.status = format!("Post-update task failed: {e}");
+                        self.status_ok = false;
+                    }
+                }
             }
             Pending::One { id, active } => {
                 if !self.elevated {
@@ -254,9 +295,89 @@ impl DiagnosticsApp {
             }
         }
         self.refresh();
+        self.integration = maintenance::read_integration();
         if self.show_verify {
-            self.verify_stamp = chrono_stamp();
+            self.verify_stamp = crate::win_cmd::local_stamp();
         }
+    }
+
+    fn draw_integration_row(&mut self, ui: &mut Ui) {
+        egui::Frame::group(ui.style())
+            .inner_margin(10.0)
+            .corner_radius(6.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new("Automation").strong());
+                ui.label(
+                    RichText::new(
+                        "Optional: open the app at logon, and re-run lockdown after Windows Update \
+                         (Event ID 19) with a logon backup.",
+                    )
+                    .small()
+                    .weak(),
+                );
+                ui.add_space(4.0);
+
+                let mut startup = self.integration.run_at_startup;
+                if ui
+                    .checkbox(&mut startup, "Run GUI when Windows starts")
+                    .changed()
+                {
+                    self.pending = Some(Pending::SetStartup(startup));
+                }
+
+                let mut post = self.integration.post_update;
+                let post_resp = ui.checkbox(
+                    &mut post,
+                    "Re-apply lockdown after Windows Update (scheduled task)",
+                );
+                if post_resp.changed() {
+                    self.pending = Some(Pending::SetPostUpdate(post));
+                }
+                if !self.elevated {
+                    ui.label(
+                        RichText::new("Post-update task requires Administrator.")
+                            .small()
+                            .color(Color32::from_rgb(220, 140, 100)),
+                    );
+                }
+            });
+    }
+
+    fn draw_system_links_row(&mut self, ui: &mut Ui) {
+        egui::Frame::group(ui.style())
+            .inner_margin(10.0)
+            .corner_radius(6.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new("Windows logs & tools").strong());
+                ui.label(
+                    RichText::new(
+                        "Open built-in viewers and folders. Same as: windows-diagnostics logs | open <id>",
+                    )
+                    .small()
+                    .weak(),
+                );
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    for link in system_links::ALL {
+                        if ui
+                            .button(link.title)
+                            .on_hover_text(format!("{} ({})", link.description, link.id))
+                            .clicked()
+                        {
+                            match system_links::open(link) {
+                                Ok(msg) => {
+                                    self.status = msg;
+                                    self.status_ok = true;
+                                }
+                                Err(e) => {
+                                    self.status = format!("Open failed: {e}");
+                                    self.status_ok = false;
+                                }
+                            }
+                        }
+                    }
+                });
+            });
     }
 
     fn draw_verify_panel(&mut self, ui: &mut Ui) {
@@ -381,7 +502,7 @@ impl DiagnosticsApp {
                                 *slot = fresh.clone();
                             }
                             self.show_verify = true;
-                            self.verify_stamp = chrono_stamp();
+                            self.verify_stamp = crate::win_cmd::local_stamp();
                             let state_s = if fresh.active { "ON" } else { "OFF" };
                             self.status = format!(
                                 "Verified {} → {state_s}: {}  ({})",
@@ -429,23 +550,4 @@ impl DiagnosticsApp {
                 }
             });
     }
-}
-
-fn chrono_stamp() -> String {
-    std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'",
-        ])
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| "just now".into())
 }
