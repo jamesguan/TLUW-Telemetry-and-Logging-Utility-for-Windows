@@ -73,9 +73,17 @@ function Get-AutoBump([string]$range) {
 }
 
 function Set-CargoVersion([string]$newVersion) {
+    $current = Get-CargoVersion
+    if ($current -eq $newVersion) {
+        Write-Host "Cargo.toml already at $newVersion (no file rewrite needed)"
+        return
+    }
+
     $toml = Get-Content "Cargo.toml" -Raw
     $toml2 = [regex]::Replace($toml, '(?m)^version\s*=\s*"[^"]+"', "version = `"$newVersion`"")
-    if ($toml2 -eq $toml) { throw "Failed to update Cargo.toml version" }
+    if ((Get-CargoVersionFromText $toml2) -ne $newVersion) {
+        throw "Failed to update Cargo.toml version (still not $newVersion)"
+    }
     Set-Content -Path "Cargo.toml" -Value $toml2 -NoNewline
 
     $lock = Get-Content "Cargo.lock" -Raw
@@ -86,10 +94,16 @@ function Set-CargoVersion([string]$newVersion) {
         "`${1}version = `"$newVersion`""
     )
     if ($lock2 -eq $lock) {
-        Write-Warning "Cargo.lock root package version not updated (pattern miss)"
+        Write-Warning "Cargo.lock root package version not updated (pattern miss or already current)"
     } else {
         Set-Content -Path "Cargo.lock" -Value $lock2 -NoNewline
     }
+}
+
+function Get-CargoVersionFromText([string]$text) {
+    $m = [regex]::Match($text, '(?m)^version\s*=\s*"([^"]+)"')
+    if (-not $m.Success) { return $null }
+    return $m.Groups[1].Value
 }
 
 function Compare-SemVer($a, $b) {
