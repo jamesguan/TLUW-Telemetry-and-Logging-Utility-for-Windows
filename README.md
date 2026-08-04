@@ -16,7 +16,7 @@ src/
   bin/cli.rs
   bin/gui.rs
 wix/main.wxs                  MSI definition (cargo-wix)
-.github/workflows/release.yml Tag → build MSI → GitHub Release
+.github/workflows/release.yml  Merge to main → build MSI → GitHub Release
 ```
 
 ---
@@ -114,6 +114,12 @@ Installer options (feature tree):
 .\target\release\windows-diagnostics.exe logs
 .\target\release\windows-diagnostics.exe open event-viewer
 .\target\release\windows-diagnostics.exe open privacy-feedback
+
+# Clear logs (destructive; most need admin + --confirm)
+.\target\release\windows-diagnostics.exe clear-list
+.\target\release\windows-diagnostics.exe clear diagnosis --confirm
+.\target\release\windows-diagnostics.exe clear event-application --confirm
+.\target\release\windows-diagnostics.exe clear-all --confirm
 ```
 
 ---
@@ -141,20 +147,26 @@ schtasks /Query /TN WindowsDiagnosticsPostUpdate
 
 ## GitHub Releases (automatic)
 
-Pushing a version tag builds the MSI and publishes a GitHub Release (binaries + MSI):
+Every **push/merge to `main`** runs `.github/workflows/release.yml`, builds the MSI + binaries, and publishes a GitHub Release.
+
+- Tag format: `v{Cargo.toml version}-build.{run_number}` (unique each merge)
+- Also still works for manual `v*` tags and **Actions → Release → Run workflow**
 
 ```powershell
-git add -A
-git commit -m "Prepare release"
-git push origin HEAD
-
-# Tag must match Cargo.toml version (example 0.3.0)
-git tag v0.3.0
-git push origin v0.3.0
+# Typical flow: merge PR / push to main — release is created by CI
+git checkout main
+git merge james
+git push origin main
 ```
 
-Workflow: `.github/workflows/release.yml`  
-You can also run it manually via **Actions → Release → Run workflow**.
+Optional manual tag release:
+
+```powershell
+git tag v0.3.1
+git push origin v0.3.1
+```
+
+Workflow: `.github/workflows/release.yml`
 
 Repo: https://github.com/jamesguan/disable-windows-diagnostics
 
