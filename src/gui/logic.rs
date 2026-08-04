@@ -1,6 +1,7 @@
 //! Business-logic handlers (library API calls) for pending GUI actions.
 
 use crate::cleanup_history;
+use crate::cleanup_schedule::{self, CleanupScheduleConfig};
 use crate::log_cleanup;
 use crate::maintenance;
 use crate::telemetry::{self, SettingId};
@@ -15,6 +16,8 @@ pub enum Pending {
     Verify,
     SetStartup(bool),
     SetPostUpdate(bool),
+    ApplyCleanupSchedule(CleanupScheduleConfig),
+    Quit,
     ClearLog(&'static str),
     ClearAllSafe,
     ClearAllLogs,
@@ -43,8 +46,11 @@ impl App {
         let on = self.settings.iter().filter(|s| s.active).count();
         self.verify_stamp = crate::win_cmd::local_stamp();
         self.hide_verify = false;
+        self.verify_highlight_until =
+            Some(self.anim_now + std::time::Duration::from_millis(1800));
         self.status = format!(
-            "Verified at {} — {off} OFF (blocked), {on} ON (collecting). Values below are live from the system.",
+            "Verified at {} — re-read {off} OFF + {on} ON from Windows (registry / services / tasks). \
+             Nothing was changed — see highlighted switches and Verified values.",
             self.verify_stamp
         );
         self.status_ok = true;
@@ -102,6 +108,35 @@ impl App {
                         self.status_ok = false;
                     }
                 }
+            }
+            Pending::ApplyCleanupSchedule(cfg) => {
+                let needs_task = cfg.is_active() || self.cleanup_schedule.task_registered;
+                if needs_task && !self.elevated {
+                    self.status =
+                        "Administrator required to create or update the cleanup scheduled task."
+                            .into();
+                    self.status_ok = false;
+                    self.cleanup_schedule = cleanup_schedule::read_state();
+                    return;
+                }
+                match cleanup_schedule::apply(&cfg) {
+                    Ok(msg) => {
+                        self.status = msg;
+                        self.status_ok = true;
+                        self.cleanup_schedule = cleanup_schedule::read_state();
+                    }
+                    Err(e) => {
+                        self.status = format!("Cleanup schedule failed: {e}");
+                        self.status_ok = false;
+                        self.cleanup_schedule = cleanup_schedule::read_state();
+                    }
+                }
+            }
+            Pending::Quit => {
+                self.force_quit = true;
+                self.tray_enabled = false;
+                self.tray = None;
+                std::process::exit(0);
             }
             Pending::ClearLog(id) => {
                 if !self.elevated {
@@ -348,7 +383,8 @@ impl App {
                 Ok(()) => {
                     self.tray_enabled = true;
                     self.status =
-                        "System tray enabled — close the window or use Minimize to tray.".into();
+                        "System tray icon shown — X / Minimize hide the window; Quit exits fully."
+                            .into();
                     self.status_ok = true;
                 }
                 Err(e) => {

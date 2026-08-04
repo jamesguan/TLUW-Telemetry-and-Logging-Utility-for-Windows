@@ -8,6 +8,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use telemetry_logging_utility::cleanup_history;
+use telemetry_logging_utility::cleanup_schedule::{self, CleanupInterval, CleanupScheduleConfig};
 use telemetry_logging_utility::disclaimer;
 use telemetry_logging_utility::identity;
 use telemetry_logging_utility::log_cleanup;
@@ -152,6 +153,48 @@ enum Commands {
         #[arg(long, default_value_t = 14)]
         days: usize,
     },
+
+    /// Configure scheduled clearing of logs and/or temp (Task Scheduler)
+    #[command(name = "cleanup-schedule")]
+    CleanupSchedule {
+        #[command(subcommand)]
+        action: CleanupScheduleCmd,
+    },
+
+    /// Run scheduled cleanup now (Task Scheduler entry point; uses saved prefs)
+    #[command(name = "scheduled-cleanup")]
+    ScheduledCleanup,
+}
+
+#[derive(Subcommand, Debug)]
+enum CleanupScheduleCmd {
+    /// Show saved prefs and whether the scheduled task is registered
+    Status,
+
+    /// Disable all triggers and remove the scheduled task
+    Off,
+
+    /// Set what to clear and when (creates/updates Task Scheduler entry)
+    Set {
+        /// off | hourly | 6h | daily | weekly
+        #[arg(long, default_value = "off")]
+        interval: String,
+        /// Also run a few minutes after user logon
+        #[arg(long)]
+        on_logon: bool,
+        /// Also run at session end / logoff (best-effort; not true power-off)
+        #[arg(long)]
+        on_session_end: bool,
+        /// Clear safe log targets
+        #[arg(long)]
+        safe_logs: bool,
+        /// Clear all log targets including dangerous (Diagnosis / Security)
+        #[arg(long)]
+        all_logs: bool,
+        /// Clear temp folders
+        #[arg(long)]
+        temp: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -218,6 +261,18 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
                 "post-update:    {}  (task: {})",
                 if s.post_update { "ON" } else { "OFF" },
                 identity::TASK_NAME
+            );
+            let cs = cleanup_schedule::read_state();
+            println!(
+                "cleanup-sched:  {}  (task: {})",
+                if cs.config.is_active() && cs.task_registered {
+                    "ON"
+                } else if cs.config.is_active() {
+                    "prefs-only"
+                } else {
+                    "OFF"
+                },
+                identity::CLEANUP_TASK_NAME
             );
             Ok(())
         }
@@ -479,6 +534,122 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
             }
             Ok(())
         }
+        Commands::CleanupSchedule { action } => cmd_cleanup_schedule(action, no_elevate),
+        Commands::ScheduledCleanup => {
+            // Task Scheduler entry: already elevated via HighestAvailable when possible.
+            match cleanup_schedule::run_now() {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+    }
+}
+
+fn cmd_cleanup_schedule(action: CleanupScheduleCmd, no_elevate: bool) -> Result<(), String> {
+    match action {
+        CleanupScheduleCmd::Status => {
+            let st = cleanup_schedule::read_state();
+            let cfg = &st.config;
+            println!("{}", cfg.summary_line());
+            println!(
+                "task registered: {}  ({})",
+                if st.task_registered { "yes" } else { "no" },
+                identity::CLEANUP_TASK_NAME
+            );
+            println!(
+                "targets: safe-logs={}  all-logs={}  temp={}",
+                on_off(cfg.clear_safe_logs),
+                on_off(cfg.clear_all_logs),
+                on_off(cfg.clear_temp)
+            );
+            println!(
+                "when:    interval={}  on-logon={}  on-session-end={}",
+                cfg.interval.as_str(),
+                on_off(cfg.on_logon),
+                on_off(cfg.on_session_end)
+            );
+            if let Some(next) = st.next_interval.as_ref() {
+                println!("{next}");
+            }
+            if let Some(sched) = st.scheduler_next.as_ref() {
+                println!("Task Scheduler next run: {sched}");
+            }
+            println!();
+            println!("Scheduled runs (`tluw scheduled-cleanup`) clear without confirmation.");
+            println!("Note: on-session-end is best-effort at logoff/disconnect.");
+            println!("      True power-off shutdown is not reliably hookable for user tasks.");
+            Ok(())
+        }
+        CleanupScheduleCmd::Off => {
+            require_admin(no_elevate)?;
+            match cleanup_schedule::disable() {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        CleanupScheduleCmd::Set {
+            interval,
+            on_logon,
+            on_session_end,
+            safe_logs,
+            all_logs,
+            temp,
+        } => {
+            require_admin(no_elevate)?;
+            let interval = CleanupInterval::from_str(&interval);
+            // If the user named no targets, keep previous prefs (or defaults).
+            let prev = cleanup_schedule::load_config();
+            let any_target_flag = safe_logs || all_logs || temp;
+            let cfg = CleanupScheduleConfig {
+                clear_safe_logs: if any_target_flag {
+                    safe_logs || all_logs
+                } else {
+                    prev.clear_safe_logs
+                },
+                clear_all_logs: if any_target_flag {
+                    all_logs
+                } else {
+                    prev.clear_all_logs
+                },
+                clear_temp: if any_target_flag { temp } else { prev.clear_temp },
+                on_logon,
+                on_session_end,
+                interval,
+            };
+            if !cfg.has_any_trigger() {
+                return Err(
+                    "specify at least one trigger: --interval hourly|6h|daily|weekly and/or --on-logon and/or --on-session-end"
+                        .into(),
+                );
+            }
+            if !cfg.has_any_target() {
+                return Err(
+                    "nothing to clear — pass --safe-logs and/or --all-logs and/or --temp (or set targets first)"
+                        .into(),
+                );
+            }
+            match cleanup_schedule::apply(&cfg) {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+    }
+}
+
+fn on_off(v: bool) -> &'static str {
+    if v {
+        "ON"
+    } else {
+        "OFF"
     }
 }
 

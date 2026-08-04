@@ -6,6 +6,8 @@
 //! - [`log_cleanup`] — wipe Diagnosis / event logs / WER / CBS (CLI + GUI)
 //! - [`temp_cleanup`] — clear TEMP / Windows\\Temp / Prefetch (CLI + GUI)
 //! - [`cleanup_history`] — daily GB freed by clears (dashboard / CLI)
+//! - [`cleanup_schedule`] — Task Scheduler: interval / logon / session-end clears
+//! - [`single_instance`] — one GUI process; later starts focus the existing window
 //! - [`prefs`] — GUI preferences (system tray, theme, …)
 //! - [`disclaimer`] — no-warranty / liability text + acceptance marker
 //! - [`gui`] — iced app (feature `gui` only); thin UI over library APIs
@@ -20,11 +22,13 @@
 #![cfg(windows)]
 
 pub mod cleanup_history;
+pub mod cleanup_schedule;
 pub mod disclaimer;
 pub mod identity;
 pub mod log_cleanup;
 pub mod maintenance;
 pub mod prefs;
+pub mod single_instance;
 pub mod system_links;
 pub mod telemetry;
 pub mod temp_cleanup;

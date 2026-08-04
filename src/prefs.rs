@@ -103,3 +103,32 @@ pub fn effective_dark(pref: ThemePref) -> bool {
         ThemePref::Dark => true,
     }
 }
+
+// --- Cleanup schedule prefs (used by cleanup_schedule) ---
+
+pub(crate) fn cleanup_bool(name: &str, default: bool) -> bool {
+    open(false)
+        .ok()
+        .and_then(|k| k.get_value::<u32, _>(name).ok())
+        .map(|v| v != 0)
+        .unwrap_or(default)
+}
+
+pub(crate) fn set_cleanup_bool(name: &str, value: bool) -> Result<(), String> {
+    let key = open(true)?;
+    key.set_value(name, &(if value { 1u32 } else { 0u32 }))
+        .map_err(|e| e.to_string())
+}
+
+pub(crate) fn cleanup_string(name: &str, default: &str) -> String {
+    open(false)
+        .ok()
+        .and_then(|k| k.get_value::<String, _>(name).ok())
+        .unwrap_or_else(|| default.to_string())
+}
+
+pub(crate) fn set_cleanup_string(name: &str, value: &str) -> Result<(), String> {
+    let key = open(true)?;
+    key.set_value(name, &value.to_string())
+        .map_err(|e| e.to_string())
+}

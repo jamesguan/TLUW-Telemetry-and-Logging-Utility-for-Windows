@@ -1,6 +1,7 @@
 //! UI messages for the iced GUI.
 
 use crate::prefs::ThemePref;
+use crate::cleanup_schedule::CleanupInterval;
 use crate::telemetry::SettingId;
 use iced::time::Instant;
 use iced::window;
@@ -22,6 +23,13 @@ pub enum Message {
     SetStartup(bool),
     SetPostUpdate(bool),
     SetTrayEnabled(bool),
+    SetCleanupClearSafe(bool),
+    SetCleanupClearAll(bool),
+    SetCleanupClearTemp(bool),
+    SetCleanupOnLogon(bool),
+    SetCleanupOnSessionEnd(bool),
+    SetCleanupInterval(CleanupInterval),
+    DisableCleanupSchedule,
     MinimizeToTray,
     Quit,
     ShowDisclaimer,

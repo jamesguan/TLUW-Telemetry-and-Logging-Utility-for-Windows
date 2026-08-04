@@ -30,7 +30,7 @@ fn gui_exe_path() -> Result<std::path::PathBuf, String> {
     }
 }
 
-fn cli_exe_path() -> Result<std::path::PathBuf, String> {
+pub(crate) fn cli_exe_path() -> Result<std::path::PathBuf, String> {
     let dir = install_dir()?;
     let cli = dir.join(format!("{CLI_BIN}.exe"));
     if cli.exists() {
@@ -45,7 +45,7 @@ fn cli_exe_path() -> Result<std::path::PathBuf, String> {
     }
 }
 
-fn task_exists(name: &str) -> bool {
+pub(crate) fn task_exists(name: &str) -> bool {
     win_cmd::command("schtasks.exe")
         .args(["/Query", "/TN", name])
         .stdout(Stdio::null())
@@ -55,7 +55,7 @@ fn task_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn delete_task(name: &str) {
+pub(crate) fn delete_task(name: &str) {
     let _ = win_cmd::command("schtasks.exe")
         .args(["/Delete", "/TN", name, "/F"])
         .stdout(Stdio::null())

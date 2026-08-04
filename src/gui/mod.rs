@@ -6,6 +6,7 @@ mod theme;
 mod view;
 
 use crate::cleanup_history::{self, DayTotals};
+use crate::cleanup_schedule::{self, CleanupScheduleState};
 use crate::disclaimer;
 use crate::identity;
 use crate::log_cleanup::{self, LogStatus};
@@ -37,6 +38,8 @@ pub struct App {
     status_ok: bool,
     pending: Option<Pending>,
     verify_stamp: String,
+    /// Brief highlight after Verify refreshes live values.
+    verify_highlight_until: Option<Instant>,
     /// When true, the verified-values table is collapsed.
     hide_verify: bool,
     /// When true, logging size/count table is collapsed.
@@ -46,6 +49,7 @@ pub struct App {
     setting_anims: [Animation<bool>; SettingId::ALL.len()],
     anim_now: Instant,
     integration: IntegrationState,
+    cleanup_schedule: CleanupScheduleState,
     link_available: Vec<(&'static str, bool)>,
     clear_available: Vec<(&'static str, bool)>,
     log_status: HashMap<&'static str, LogStatus>,
@@ -79,6 +83,21 @@ impl App {
         self.setting_anims.iter().any(|a| a.is_animating(now))
     }
 
+    pub(crate) fn verify_flash(&self) -> f32 {
+        let Some(until) = self.verify_highlight_until else {
+            return 0.0;
+        };
+        if self.anim_now >= until {
+            return 0.0;
+        }
+        let left = (until - self.anim_now).as_secs_f32();
+        (left / 1.8).clamp(0.0, 1.0)
+    }
+
+    fn verify_highlight_active(&self) -> bool {
+        self.verify_flash() > 0.01
+    }
+
     fn ask_confirm(
         &mut self,
         title: impl Into<String>,
@@ -96,6 +115,43 @@ impl App {
         });
     }
 
+    fn queue_cleanup_schedule(&mut self, cfg: cleanup_schedule::CleanupScheduleConfig) {
+        self.cleanup_schedule.next_interval =
+            cleanup_schedule::describe_next_interval(cfg.interval);
+        self.cleanup_schedule.config = cfg.clone();
+        self.pending = Some(Pending::ApplyCleanupSchedule(cfg));
+    }
+
+    /// Hide the main window and ensure a tray icon remains so the app stays running.
+    fn hide_to_tray(&mut self) -> Task<Message> {
+        if self.hwnd == 0 {
+            self.status = "Window handle not ready yet — try again in a moment.".into();
+            self.status_ok = false;
+            return Task::none();
+        }
+        if self.tray.is_none() {
+            match self.try_create_tray() {
+                Ok(()) => {
+                    self.tray_enabled = true;
+                    let _ = prefs::set_tray_enabled(true);
+                }
+                Err(e) => {
+                    self.status = format!(
+                        "Could not keep running in the tray ({e}). Use Quit to exit, or enable tray in Settings."
+                    );
+                    self.status_ok = false;
+                    return Task::none();
+                }
+            }
+        }
+        tray::win_hwnd::hide(self.hwnd);
+        self.status =
+            "Running in the system tray. Open it from the tray icon, or Quit from the tray menu."
+                .into();
+        self.status_ok = true;
+        Task::none()
+    }
+
     fn new() -> Self {
         let elevated = telemetry::is_elevated();
         let settings = telemetry::read_all();
@@ -106,20 +162,22 @@ impl App {
             settings,
             expanded: [false; SettingId::ALL.len()],
             status: if elevated {
-                "Ready. Use Verify status to re-read live registry/service values.".into()
-            } else {
-                "Not elevated — you can Verify status (read-only); changes need Administrator."
+                "Ready. Verify status re-reads live ON/OFF from Windows (does not change anything)."
                     .into()
+            } else {
+                "Not elevated — Verify status is read-only; changes need Administrator.".into()
             },
             status_ok: true,
             pending: None,
             verify_stamp: crate::win_cmd::local_stamp(),
+            verify_highlight_until: None,
             hide_verify: false,
             hide_log_details: false,
             hide_temp_details: false,
             setting_anims: std::array::from_fn(|_| Self::accordion_anim(false)),
             anim_now: Instant::now(),
             integration: maintenance::read_integration(),
+            cleanup_schedule: cleanup_schedule::read_state(),
             link_available: system_links::availability_map(),
             clear_available: log_cleanup::availability_map(),
             log_status: HashMap::new(),
@@ -219,15 +277,10 @@ impl App {
                     if let Some(id) = self.window_id {
                         return window::close(id);
                     }
-                } else if self.tray_enabled && self.tray.is_some() {
-                    tray::win_hwnd::hide(self.hwnd);
-                    self.status =
-                        "Running in the system tray. Right-click the tray icon for quick actions."
-                            .into();
-                    self.status_ok = true;
-                } else if let Some(id) = self.window_id {
-                    return window::close(id);
+                    std::process::exit(0);
                 }
+                // X / Alt+F4: hide the window, keep the process + system tray.
+                return self.hide_to_tray();
             }
             Message::Verify => self.pending = Some(Pending::Verify),
             Message::TurnAllOff => self.ask_confirm(
@@ -256,6 +309,7 @@ impl App {
             Message::ShowSettings => {
                 self.show_settings = true;
                 self.integration = maintenance::read_integration();
+                self.cleanup_schedule = cleanup_schedule::read_state();
             }
             Message::CloseSettings => self.show_settings = false,
             Message::SetTheme(pref) => {
@@ -271,13 +325,62 @@ impl App {
             Message::SetStartup(v) => self.pending = Some(Pending::SetStartup(v)),
             Message::SetPostUpdate(v) => self.pending = Some(Pending::SetPostUpdate(v)),
             Message::SetTrayEnabled(v) => self.apply_tray_pref(v),
-            Message::MinimizeToTray => tray::win_hwnd::hide(self.hwnd),
-            Message::Quit => {
-                self.force_quit = true;
-                self.tray_enabled = false;
-                self.tray = None;
-                std::process::exit(0);
+            Message::SetCleanupClearSafe(v) => {
+                let mut cfg = self.cleanup_schedule.config.clone();
+                cfg.clear_safe_logs = v;
+                if v {
+                    // Safe is implied by all-logs; leaving both on is fine.
+                } else if !cfg.clear_all_logs {
+                    // ok
+                }
+                self.queue_cleanup_schedule(cfg);
             }
+            Message::SetCleanupClearAll(v) => {
+                let mut cfg = self.cleanup_schedule.config.clone();
+                cfg.clear_all_logs = v;
+                if v {
+                    cfg.clear_safe_logs = true;
+                }
+                self.queue_cleanup_schedule(cfg);
+            }
+            Message::SetCleanupClearTemp(v) => {
+                let mut cfg = self.cleanup_schedule.config.clone();
+                cfg.clear_temp = v;
+                self.queue_cleanup_schedule(cfg);
+            }
+            Message::SetCleanupOnLogon(v) => {
+                let mut cfg = self.cleanup_schedule.config.clone();
+                cfg.on_logon = v;
+                self.queue_cleanup_schedule(cfg);
+            }
+            Message::SetCleanupOnSessionEnd(v) => {
+                let mut cfg = self.cleanup_schedule.config.clone();
+                cfg.on_session_end = v;
+                self.queue_cleanup_schedule(cfg);
+            }
+            Message::SetCleanupInterval(interval) => {
+                let mut cfg = self.cleanup_schedule.config.clone();
+                cfg.interval = interval;
+                self.queue_cleanup_schedule(cfg);
+            }
+            Message::DisableCleanupSchedule => {
+                let mut cfg = self.cleanup_schedule.config.clone();
+                cfg.on_logon = false;
+                cfg.on_session_end = false;
+                cfg.interval = cleanup_schedule::CleanupInterval::Off;
+                self.queue_cleanup_schedule(cfg);
+            }
+            Message::MinimizeToTray => {
+                return self.hide_to_tray();
+            }
+            Message::Quit => self.ask_confirm(
+                format!("Quit {}?", identity::PRODUCT_NAME_SHORT),
+                "Exit the application completely?\n\n\
+                 The window and system tray icon will both close.",
+                "Quit",
+                true,
+                Pending::Quit,
+            ),
             Message::ShowDisclaimer => self.show_disclaimer = true,
             Message::AcceptDisclaimer => match disclaimer::accept("gui") {
                 Ok(rec) => {
@@ -379,12 +482,13 @@ impl App {
                 }
                 self.hide_verify = false;
                 self.verify_stamp = crate::win_cmd::local_stamp();
+                self.verify_highlight_until =
+                    Some(self.anim_now + Duration::from_millis(1800));
                 let state_s = if fresh.active { "ON" } else { "OFF" };
                 self.status = format!(
-                    "Verified {} → {state_s}: {}  ({})",
+                    "Verified {} → {state_s}: {}  (live re-read; nothing changed)",
                     fresh.id.cli_name(),
-                    fresh.note,
-                    fresh.id.detail()
+                    fresh.note
                 );
                 self.status_ok = true;
             }
@@ -556,7 +660,7 @@ impl App {
             window::close_requests().map(|_| Message::WindowClose),
             window::open_events().map(Message::WindowOpened),
         ];
-        if self.any_accordion_animating() {
+        if self.any_accordion_animating() || self.verify_highlight_active() {
             subs.push(window::frames().map(Message::AnimTick));
         }
         Subscription::batch(subs)
@@ -591,6 +695,8 @@ pub fn run() -> iced::Result {
             size: iced::Size::new(760.0, 900.0),
             min_size: Some(iced::Size::new(420.0, 520.0)),
             icon,
+            // Handle X ourselves so we can hide to tray instead of exiting.
+            exit_on_close_request: false,
             ..Default::default()
         })
         .title(identity::PRODUCT_NAME)

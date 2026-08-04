@@ -42,6 +42,9 @@ pub const RUN_VALUE: &str = "TelemetryLoggingUtility";
 /// Scheduled task name for post-update lockdown.
 pub const TASK_NAME: &str = "TelemetryLoggingUtilityPostUpdate";
 
+/// Scheduled task name for automated log/temp cleanup.
+pub const CLEANUP_TASK_NAME: &str = "TelemetryLoggingUtilityCleanup";
+
 // --- Legacy (pre-rename) ---
 
 const LEGACY_REG_KEY: &str = "WindowsDiagnostics";

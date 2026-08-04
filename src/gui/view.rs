@@ -1,6 +1,7 @@
 //! View rendering for the iced GUI.
 
 use crate::cleanup_history::{self, DayTotals};
+use crate::cleanup_schedule::{self, CleanupInterval};
 use crate::disclaimer;
 use crate::identity;
 use crate::log_cleanup;
@@ -55,23 +56,50 @@ fn secondary_btn_idle<'a>(label: impl Into<Element<'a, Message>>) -> Button<'a, 
 }
 
 fn section<'a>(content: Column<'a, Message>) -> Element<'a, Message> {
+    section_with_flash(content, 0.0)
+}
+
+fn section_with_flash<'a>(content: Column<'a, Message>, flash: f32) -> Element<'a, Message> {
+    let flash = flash.clamp(0.0, 1.0);
     container(content.spacing(8).width(Length::Fill))
         .width(Length::Fill)
         .padding(SECTION_PAD)
-        .style(|theme: &Theme| container::Style {
-            background: Some(iced::Background::Color(match theme {
-                Theme::Dark => Color::from_rgb(0.125, 0.145, 0.17),
-                _ => Color::from_rgb(0.94, 0.945, 0.95),
-            })),
-            border: iced::Border {
-                color: match theme {
-                    Theme::Dark => Color::from_rgb(0.2, 0.23, 0.27),
-                    _ => Color::from_rgb(0.82, 0.85, 0.88),
+        .style(move |theme: &Theme| {
+            let (bg, stroke, width) = match theme {
+                Theme::Dark => (
+                    Color::from_rgb(0.125, 0.145, 0.17),
+                    Color::from_rgb(0.2, 0.23, 0.27),
+                    1.0,
+                ),
+                _ => (
+                    Color::from_rgb(0.94, 0.945, 0.95),
+                    Color::from_rgb(0.82, 0.85, 0.88),
+                    1.0,
+                ),
+            };
+            let (border_color, border_width) = if flash > 0.01 {
+                let accent = Color::from_rgb(0.28, 0.72, 0.45);
+                (
+                    Color {
+                        r: stroke.r + (accent.r - stroke.r) * flash,
+                        g: stroke.g + (accent.g - stroke.g) * flash,
+                        b: stroke.b + (accent.b - stroke.b) * flash,
+                        a: 1.0,
+                    },
+                    1.0 + 2.0 * flash,
+                )
+            } else {
+                (stroke, width)
+            };
+            container::Style {
+                background: Some(iced::Background::Color(bg)),
+                border: iced::Border {
+                    color: border_color,
+                    width: border_width,
+                    radius: 6.0.into(),
                 },
-                width: 1.0,
-                radius: 6.0.into(),
-            },
-            ..Default::default()
+                ..Default::default()
+            }
         })
         .into()
 }
@@ -216,7 +244,14 @@ fn accordion<'a>(
 
 pub fn view(app: &App) -> Element<'_, Message> {
     if app.show_disclaimer {
-        return disclaimer_view(app);
+        let mut layers = vec![disclaimer_view(app)];
+        if app.confirm.is_some() {
+            layers.push(opaque(confirm_overlay(app)));
+        }
+        return stack(layers)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
     }
 
     let body = column![
@@ -255,10 +290,11 @@ fn header(app: &App) -> Element<'_, Message> {
     };
 
     let mut actions: Vec<Element<Message>> = vec![elev_label.into()];
-    if app.tray_enabled {
-        actions.push(small_btn("Minimize to tray", Message::MinimizeToTray));
-    }
-    actions.push(small_btn("Settings", Message::ShowSettings));
+    actions.push(small_btn("Minimize to tray", Message::MinimizeToTray));
+    actions.push(
+        secondary_btn(text("⚙").size(16), Message::ShowSettings)
+            .into(),
+    );
     actions.push(danger_btn(text("Quit").size(12), Message::Quit).into());
 
     let primary = primary_actions(app);
@@ -295,14 +331,21 @@ fn primary_actions(app: &App) -> Element<'_, Message> {
         items.push(primary_btn("Restart as Administrator", Message::RestartElevated).into());
     }
 
-    items.push(
+    column![
+        wrap_row(items),
+        text(
+            "Verify status re-reads live ON/OFF from Windows (registry, services, tasks). \
+             It does not change settings — switches and Verified values refresh and highlight."
+        )
+        .size(11)
+        .color(Color::from_rgb(0.55, 0.55, 0.6)),
         text("OFF = privacy / blocked    ·    ON = collecting / allowed")
             .size(11)
-            .color(Color::from_rgb(0.55, 0.55, 0.6))
-            .into(),
-    );
-
-    wrap_row(items)
+            .color(Color::from_rgb(0.55, 0.55, 0.6)),
+    ]
+    .spacing(4)
+    .width(Length::Fill)
+    .into()
 }
 
 fn footer(app: &App) -> Element<'_, Message> {
@@ -348,8 +391,37 @@ fn footer(app: &App) -> Element<'_, Message> {
 }
 
 fn main_scroll(app: &App) -> Element<'_, Message> {
+    let flash = app.verify_flash();
     let mut col = Column::new().spacing(10).width(Length::Fill);
     col = col.push(dashboard(app));
+    if flash > 0.01 {
+        col = col.push(
+            container(
+                text(
+                    "Updated from Windows: telemetry switches · Verified values table \
+                     (read-only check — nothing was changed)",
+                )
+                .size(12)
+                .color(Color::from_rgb(0.22, 0.55, 0.35)),
+            )
+            .width(Length::Fill)
+            .padding([8, 10])
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgba(
+                    0.28,
+                    0.72,
+                    0.45,
+                    0.12 + 0.10 * flash,
+                ))),
+                border: iced::Border {
+                    color: Color::from_rgba(0.28, 0.72, 0.45, 0.35 + 0.45 * flash),
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            }),
+        );
+    }
     // Always reserve the verify accordion header so Verify doesn't shove the page.
     col = col.push(verify_panel(app));
     for (idx, state) in app.settings.iter().enumerate() {
@@ -411,11 +483,14 @@ fn settings_overlay(app: &App) -> Element<'_, Message> {
             column![
                 text("Settings").size(18),
                 text(
-                    "Preferences that stay out of the way — startup, post-update lockdown, and tray."
+                    "Preferences that stay out of the way — startup, cleanup schedule, \
+                     post-update lockdown, and tray."
                 )
                 .size(12)
                 .color(Color::from_rgb(0.55, 0.55, 0.6)),
-                settings_body(app),
+                scrollable(settings_body(app))
+                    .height(Length::Fixed(420.0))
+                    .width(Length::Fill),
                 rule::horizontal(1),
                 row![
                     Space::new().width(Length::Fill),
@@ -427,7 +502,7 @@ fn settings_overlay(app: &App) -> Element<'_, Message> {
             .width(Length::Fill)
             .padding(16),
         )
-        .width(Length::Fixed(440.0))
+        .width(Length::Fixed(520.0))
         .style(|theme: &Theme| container::Style {
             background: Some(iced::Background::Color(match theme {
                 Theme::Dark => Color::from_rgb(0.14, 0.16, 0.19),
@@ -546,6 +621,26 @@ fn settings_body(app: &App) -> Element<'_, Message> {
     .spacing(8)
     .align_y(Alignment::Center);
 
+    let cfg = &app.cleanup_schedule.config;
+    let mut interval_items: Vec<Element<Message>> = Vec::new();
+    for iv in CleanupInterval::ALL {
+        let selected = cfg.interval == iv;
+        let btn = if selected {
+            secondary_btn_idle(text(iv.label()).size(12)).style(theme::btn_primary)
+        } else {
+            secondary_btn(text(iv.label()).size(12), Message::SetCleanupInterval(iv))
+        };
+        interval_items.push(btn.into());
+    }
+
+    let schedule_status = if app.cleanup_schedule.task_registered && cfg.is_active() {
+        format!("Task registered · {}", cfg.summary_line())
+    } else if cfg.is_active() {
+        "Prefs saved — task not registered yet (needs Administrator).".to_string()
+    } else {
+        "Cleanup schedule is off.".to_string()
+    };
+
     let mut col = column![
         text("Appearance").size(14),
         text("Use the system theme, or lock light/dark for this app.")
@@ -567,23 +662,123 @@ fn settings_body(app: &App) -> Element<'_, Message> {
 
     if !app.elevated {
         col = col.push(
-            text("Post-update task requires Administrator.")
+            text("Post-update and cleanup tasks require Administrator.")
                 .size(12)
                 .color(elevated_warn()),
         );
     }
 
     col = col.push(rule::horizontal(1));
+    col = col.push(text("Scheduled cleanup").size(14));
+    col = col.push(
+        text(
+            "Clear selected logs and/or temp on an interval, at logon (startup), \
+             or at session end (logoff). Uses Windows Task Scheduler."
+        )
+        .size(12)
+        .color(Color::from_rgb(0.55, 0.55, 0.6)),
+    );
+    col = col.push(
+        text(schedule_status)
+            .size(11)
+            .color(Color::from_rgb(0.55, 0.55, 0.6)),
+    );
+    col = col.push(text("What to clear").size(12));
+    col = col.push(
+        row![
+            checkbox(cfg.clear_safe_logs).on_toggle(Message::SetCleanupClearSafe),
+            text("Safe logs").size(12),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
+    col = col.push(
+        row![
+            checkbox(cfg.clear_all_logs).on_toggle(Message::SetCleanupClearAll),
+            text("All logs (includes Diagnosis / Security)").size(12),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
+    col = col.push(
+        row![
+            checkbox(cfg.clear_temp).on_toggle(Message::SetCleanupClearTemp),
+            text("Temp folders").size(12),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
+    col = col.push(text("When").size(12));
+    col = col.push(
+        text("Interval")
+            .size(11)
+            .color(Color::from_rgb(0.55, 0.55, 0.6)),
+    );
+    col = col.push(wrap_row(interval_items));
+    if let Some(next) = cleanup_schedule::describe_next_interval(cfg.interval) {
+        col = col.push(
+            text(next)
+                .size(12)
+                .color(Color::from_rgb(0.35, 0.55, 0.40)),
+        );
+        if let Some(sched) = app.cleanup_schedule.scheduler_next.as_ref() {
+            col = col.push(
+                text(format!("Task Scheduler next run: {sched}"))
+                    .size(11)
+                    .color(Color::from_rgb(0.55, 0.55, 0.6)),
+            );
+        }
+        col = col.push(
+            text("Scheduled runs clear without asking for confirmation.")
+                .size(11)
+                .color(Color::from_rgb(0.55, 0.55, 0.6)),
+        );
+    }
+    col = col.push(
+        row![
+            checkbox(cfg.on_logon).on_toggle(Message::SetCleanupOnLogon),
+            text("At user logon (startup)").size(12),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
+    col = col.push(
+        row![
+            checkbox(cfg.on_session_end).on_toggle(Message::SetCleanupOnSessionEnd),
+            text("At session end / logoff (best-effort)").size(12),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
+    col = col.push(
+        text(
+            "True power-off shutdown is not reliably hookable for a user-scoped task; \
+             session end is the practical substitute."
+        )
+        .size(11)
+        .color(Color::from_rgb(0.55, 0.55, 0.6)),
+    );
+    if cfg.is_active() || app.cleanup_schedule.task_registered {
+        col = col.push(secondary_btn(
+            text("Disable cleanup schedule").size(12),
+            Message::DisableCleanupSchedule,
+        ));
+    }
+
+    col = col.push(rule::horizontal(1));
     col = col.push(text("System tray").size(14));
     col = col.push(
-        text("Keep the app available from the notification area.")
-            .size(12)
-            .color(Color::from_rgb(0.55, 0.55, 0.6)),
+        text(
+            "Closing the window (X) always hides to the tray. Quit exits the app completely. \
+             Prefer keeping the tray icon enabled so you can reopen quickly."
+        )
+        .size(12)
+        .color(Color::from_rgb(0.55, 0.55, 0.6)),
     );
     col = col.push(
         row![
             checkbox(app.tray_enabled).on_toggle(Message::SetTrayEnabled),
-            text("Keep in system tray (close hides window)").size(12),
+            text("Show system tray icon while the window is open").size(12),
         ]
         .spacing(8)
         .align_y(Alignment::Center),
@@ -1151,6 +1346,7 @@ fn hide_checkbox<'a>(hidden: bool, on_toggle: impl Fn(bool) -> Message + 'a) -> 
 
 fn verify_panel(app: &App) -> Element<'_, Message> {
     let theme = ThemePaint::get(app.is_dark());
+    let flash = app.verify_flash();
     let stamp = if app.verify_stamp.is_empty() {
         "live status".to_string()
     } else {
@@ -1165,7 +1361,8 @@ fn verify_panel(app: &App) -> Element<'_, Message> {
             hide_checkbox(app.hide_verify, Message::HideVerify),
         ]),
         text(
-            "Live values Windows reports for each field this app changes.",
+            "Live values Windows reports for each field this app can change. \
+             Verify status refreshes this table from the system (read-only).",
         )
         .size(12)
         .color(theme.text_muted),
@@ -1196,7 +1393,7 @@ fn verify_panel(app: &App) -> Element<'_, Message> {
         }
     }
 
-    section(col)
+    section_with_flash(col, flash)
 }
 
 fn setting_card<'a>(app: &'a App, idx: usize, state: &SettingState) -> Element<'a, Message> {
@@ -1259,7 +1456,7 @@ fn setting_card<'a>(app: &'a App, idx: usize, state: &SettingState) -> Element<'
         .into(),
     );
 
-    section(
+    section_with_flash(
         column![
             wrap_row(action_items),
             text(format!("Value: {}", state.note)).size(11),
@@ -1275,6 +1472,7 @@ fn setting_card<'a>(app: &'a App, idx: usize, state: &SettingState) -> Element<'
             ),
         ]
         .spacing(4),
+        app.verify_flash(),
     )
 }
 
