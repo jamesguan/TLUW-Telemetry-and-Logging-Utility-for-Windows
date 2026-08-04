@@ -1,17 +1,38 @@
 [package]
 name = "windows-diagnostics"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
-description = "Disable Windows diagnostic data, telemetry, and related analytics"
+description = "CLI and GUI tools to inspect and toggle Windows diagnostic data / telemetry"
 license = "MIT"
 readme = "README.md"
-keywords = ["windows", "telemetry", "privacy", "diagnostics"]
-categories = ["command-line-utilities", "os"]
-# Set this to your GitHub URL before publishing:
+keywords = ["windows", "telemetry", "privacy", "diagnostics", "cli"]
+categories = ["command-line-utilities", "gui"]
 # repository = "https://github.com/YOUR_USER/windows-diagnostics"
+
+[lib]
+name = "windows_diagnostics"
+path = "src/lib.rs"
+
+[[bin]]
+name = "windows-diagnostics"
+path = "src/bin/cli.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "windows-diagnostics-gui"
+path = "src/bin/gui.rs"
+required-features = ["gui"]
+
+[features]
+default = ["cli", "gui"]
+cli = ["dep:clap"]
+gui = ["dep:eframe", "dep:egui"]
 
 [dependencies]
 winreg = "0.55"
+clap = { version = "4", features = ["derive"], optional = true }
+eframe = { version = "0.31", default-features = true, features = ["default_fonts", "glow"], optional = true }
+egui = { version = "0.31", optional = true }
 
 [profile.release]
 lto = true
