@@ -7,7 +7,8 @@ license = "MIT"
 readme = "README.md"
 keywords = ["windows", "telemetry", "privacy", "diagnostics"]
 categories = ["command-line-utilities", "os"]
-repository = "https://github.com/OWNER/windows-diagnostics"
+# Set this to your GitHub URL before publishing:
+# repository = "https://github.com/YOUR_USER/windows-diagnostics"
 
 [dependencies]
 winreg = "0.55"

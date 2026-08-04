@@ -20,7 +20,7 @@ Double-click the exe (or a desktop shortcut). It will prompt for Administrator v
 ## Build
 
 ```powershell
-git clone https://github.com/OWNER/windows-diagnostics.git
+git clone https://github.com/YOUR_USER/windows-diagnostics.git
 cd windows-diagnostics
 cargo build --release
 ```
@@ -72,6 +72,23 @@ It does **not** disable Windows Update, Microsoft Defender, or BITS.
 - Blocking Microsoft domains in `hosts` or deleting system binaries is out of scope and can break updates.
 - On Windows Home, Group Policy-equivalent registry keys may have limited effect.
 
+## Publish to GitHub
+
+From this folder (install [GitHub CLI](https://cli.github.com/) if you want `gh`):
+
+```powershell
+cd C:\Users\Garuda\Projects\windows-diagnostics
+
+# If you use GitHub CLI:
+gh repo create windows-diagnostics --public --source=. --remote=origin --push
+
+# Or create an empty repo on github.com, then:
+git remote add origin https://github.com/YOUR_USER/windows-diagnostics.git
+git push -u origin main
+```
+
+Replace `YOUR_USER` with your GitHub username. Update the clone URL in this README to match.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
