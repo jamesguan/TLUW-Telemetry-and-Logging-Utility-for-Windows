@@ -28,19 +28,19 @@ required-features = ["gui"]
 [features]
 default = ["cli", "gui"]
 cli = ["dep:clap"]
-gui = ["dep:eframe", "dep:egui"]
+gui = ["dep:eframe", "dep:egui", "dep:tray-icon", "dep:raw-window-handle", "dep:image"]
 
 [dependencies]
 winreg = "0.55"
 clap = { version = "4", features = ["derive"], optional = true }
 eframe = { version = "0.31", default-features = true, features = ["default_fonts", "glow"], optional = true }
 egui = { version = "0.31", optional = true }
+tray-icon = { version = "0.19", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
-[profile.release]
-lto = true
-codegen-units = 1
-strip = true
-opt-level = "z"
+[build-dependencies]
+winres = "0.1"
 
 [package.metadata.wix]
 # MSI name / product
@@ -48,6 +48,6 @@ name = "Windows Diagnostics"
 # Include both binaries via custom wix/main.wxs
 eula = false
 license = false
-product-icon = false
+product-icon = "assets/windows-diagnostics-icon.ico"
 # Path where MSI is written (relative to target/)
 include = []

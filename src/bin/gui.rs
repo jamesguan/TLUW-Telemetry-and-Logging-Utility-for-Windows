@@ -4,8 +4,20 @@
 #![cfg(windows)]
 
 use eframe::egui;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use windows_diagnostics::app_icon;
 use windows_diagnostics::gui::DiagnosticsApp;
 use windows_diagnostics::telemetry;
+
+fn resolve_hwnd(cc: &eframe::CreationContext<'_>) -> isize {
+    let Ok(handle) = cc.window_handle() else {
+        return 0;
+    };
+    match handle.as_raw() {
+        RawWindowHandle::Win32(h) => h.hwnd.get() as isize,
+        _ => 0,
+    }
+}
 
 fn main() -> eframe::Result<()> {
     if !telemetry::is_elevated() {
@@ -17,9 +29,10 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([720.0, 780.0])
-            .with_min_inner_size([560.0, 480.0])
-            .with_title("Windows Diagnostics"),
+            .with_inner_size([760.0, 900.0])
+            .with_min_inner_size([600.0, 560.0])
+            .with_title("Windows Diagnostics")
+            .with_icon(app_icon::egui_icon()),
         ..Default::default()
     };
 
@@ -30,7 +43,8 @@ fn main() -> eframe::Result<()> {
             let mut style = (*cc.egui_ctx.style()).clone();
             style.spacing.item_spacing = egui::vec2(8.0, 6.0);
             cc.egui_ctx.set_style(style);
-            Ok(Box::new(DiagnosticsApp::default()))
+            let hwnd = resolve_hwnd(&cc);
+            Ok(Box::new(DiagnosticsApp::new(hwnd, cc.egui_ctx.clone())))
         }),
     )
 }

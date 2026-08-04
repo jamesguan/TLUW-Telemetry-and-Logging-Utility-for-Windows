@@ -39,6 +39,8 @@
         <Property Id='DiskPrompt' Value='Windows Diagnostics Installation'/>
         <Property Id='ARPHELPLINK' Value='https://github.com/jamesguan/disable-windows-diagnostics'/>
         <Property Id='WIXUI_INSTALLDIR' Value='APPLICATIONFOLDER'/>
+        <Property Id='ARPPRODUCTICON' Value='AppIcon'/>
+        <Icon Id='AppIcon' SourceFile='assets\windows-diagnostics-icon.ico'/>
 
         <Directory Id='TARGETDIR' Name='SourceDir'>
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
@@ -90,7 +92,9 @@
                     Name='Windows Diagnostics'
                     Description='Toggle and verify Windows diagnostic data'
                     Target='[Bin]windows-diagnostics-gui.exe'
-                    WorkingDirectory='Bin'/>
+                    WorkingDirectory='Bin'
+                    Icon='AppIcon'
+                    IconIndex='0'/>
                 <RemoveFolder Id='RemoveApplicationProgramsFolder' On='uninstall'/>
                 <RegistryValue
                     Root='HKCU'
@@ -110,7 +114,9 @@
                     Name='Windows Diagnostics'
                     Description='Toggle and verify Windows diagnostic data'
                     Target='[Bin]windows-diagnostics-gui.exe'
-                    WorkingDirectory='Bin'/>
+                    WorkingDirectory='Bin'
+                    Icon='AppIcon'
+                    IconIndex='0'/>
                 <RegistryValue
                     Root='HKCU'
                     Key='Software\WindowsDiagnostics'
@@ -129,7 +135,9 @@
                     Name='Windows Diagnostics'
                     Description='Start Windows Diagnostics at logon'
                     Target='[Bin]windows-diagnostics-gui.exe'
-                    WorkingDirectory='Bin'/>
+                    WorkingDirectory='Bin'
+                    Icon='AppIcon'
+                    IconIndex='0'/>
                 <RegistryValue
                     Root='HKCU'
                     Key='Software\WindowsDiagnostics'

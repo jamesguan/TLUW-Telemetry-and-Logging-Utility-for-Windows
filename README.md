@@ -192,10 +192,20 @@ Repo: https://github.com/jamesguan/disable-windows-diagnostics
 - Post-update re-apply cannot catch every Microsoft reset; the logon backup helps after feature updates.
 - Windows Home may ignore some policy keys.
 - Reboot after a full lockdown is recommended.
+- GUI **Dashboard** shows telemetry ON/OFF chips and daily GB freed by log/temp clears (`windows-diagnostics history`).
+- Optional **system tray** (Automation): close hides to tray; right-click for Open / Disable telemetry / Clear safe logs / Quit.
+
+## Disclaimer / liability
+
+**USE AT YOUR OWN RISK.** This software is provided **AS IS** with **NO WARRANTY**. The authors accept **NO LIABILITY** for data loss, system damage, compliance issues, or any other claim arising from its use.
+
+Full waiver (also shown on first GUI launch): [DISCLAIMER.md](DISCLAIMER.md). CLI: `windows-diagnostics disclaimer`.
+
+This is not legal advice; consult an attorney if you need formal protection.
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — see [LICENSE](LICENSE).
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — see [LICENSE](LICENSE). The license’s **No Liability** section applies; [DISCLAIMER.md](DISCLAIMER.md) adds product-specific risk and indemnity language.
 
 **Personal / private and other non-commercial use only.** Commercial use is not allowed.  
 (This is source-available, not OSI “Open Source,” which requires allowing commercial use.)

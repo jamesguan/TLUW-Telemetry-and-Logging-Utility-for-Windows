@@ -7,18 +7,24 @@
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use windows_diagnostics::cleanup_history;
+use windows_diagnostics::disclaimer;
+use windows_diagnostics::log_cleanup;
 use windows_diagnostics::maintenance;
 use windows_diagnostics::system_links;
 use windows_diagnostics::telemetry::{
     self, apply, apply_all, ensure_elevated, read_all, read_one, SettingId,
 };
+use windows_diagnostics::temp_cleanup;
 
 #[derive(Parser, Debug)]
 #[command(
     name = "windows-diagnostics",
     about = "Inspect and toggle Windows diagnostic data / telemetry (CLI)",
     long_about = "Core commands to disable or enable Windows diagnostic collection.\n\
-                  The GUI (windows-diagnostics-gui.exe) is optional and calls the same library."
+                  The GUI (windows-diagnostics-gui.exe) is optional and calls the same library.\n\n\
+                  USE AT YOUR OWN RISK — AS IS, NO WARRANTY, NO LIABILITY.\n\
+                  See `windows-diagnostics disclaimer` and DISCLAIMER.md."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -81,6 +87,69 @@ enum Commands {
     Open {
         /// Link id, e.g. event-viewer, privacy-feedback
         id: String,
+    },
+
+    /// List clearable log targets (Diagnosis folder, event logs, WER, …)
+    #[command(name = "clear-list")]
+    ClearList,
+
+    /// Open the folder / Event Viewer for a clear target (see `clear-list`)
+    #[command(name = "open-log")]
+    OpenLog {
+        id: String,
+    },
+
+    /// Clear one log target by id (see `clear-list`). Destructive; needs admin for most.
+    Clear {
+        /// Target id, e.g. diagnosis, event-application, wer
+        id: String,
+        /// Required for dangerous targets (diagnosis*, event-security)
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Clear all available log targets (add `--dangerous` for Diagnosis / Security)
+    #[command(name = "clear-all")]
+    ClearAll {
+        #[arg(long)]
+        dangerous: bool,
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// List temp-folder cleanup targets
+    #[command(name = "temp-list")]
+    TempList,
+
+    /// Open a temp location (see `temp-list`)
+    #[command(name = "open-temp")]
+    OpenTemp {
+        id: String,
+    },
+
+    /// Clear one temp target (see `temp-list`)
+    #[command(name = "clear-temp")]
+    ClearTemp {
+        id: String,
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Clear all available temp targets
+    #[command(name = "clear-temp-all")]
+    ClearTempAll {
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Print the full no-warranty / liability disclaimer
+    Disclaimer,
+
+    /// Show daily GB freed by log/temp clears (dashboard history)
+    History {
+        /// How many recent days to list (default 14)
+        #[arg(long, default_value_t = 14)]
+        days: usize,
     },
 }
 
@@ -187,6 +256,226 @@ fn run(command: Commands, no_elevate: bool) -> Result<(), String> {
             }
             Err(e) => Err(e),
         },
+        Commands::ClearList => {
+            println!("{:<24} {:<6} {}", "ID", "AVAIL", "STATUS");
+            println!("{}", "-".repeat(78));
+            for a in log_cleanup::ALL {
+                let avail = if a.is_available() { "yes" } else { "no" };
+                let danger = if a.dangerous { " [dangerous]" } else { "" };
+                println!("{:<24} {:<6} {}{danger}", a.id, avail, a.title);
+                if a.is_available() {
+                    let st = log_cleanup::inspect(a);
+                    println!("  {}", st.summary_line());
+                } else {
+                    println!("  {}", a.description);
+                }
+            }
+            println!();
+            println!("Open loc:   windows-diagnostics open-log <id>");
+            println!("Clear one:  windows-diagnostics clear <id> --confirm");
+            println!("Clear safe: windows-diagnostics clear-all --confirm");
+            Ok(())
+        }
+        Commands::OpenLog { id } => {
+            let action = log_cleanup::ClearAction::find(&id)
+                .ok_or_else(|| format!("unknown clear target '{id}' (see clear-list)"))?;
+            let status = log_cleanup::inspect(action);
+            println!("{}", status.summary_line());
+            match log_cleanup::open_location(action) {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::Clear { id, confirm } => {
+            let action = log_cleanup::ClearAction::find(&id)
+                .ok_or_else(|| format!("unknown clear target '{id}' (see clear-list)"))?;
+            if action.dangerous && !confirm {
+                return Err(format!(
+                    "'{}' is dangerous — re-run with --confirm",
+                    action.id
+                ));
+            }
+            if !confirm {
+                return Err("refusing to clear without --confirm".into());
+            }
+            require_admin(no_elevate)?;
+            match log_cleanup::clear(action) {
+                Ok(result) => {
+                    println!("{}", result.summary_line());
+                    println!("  before: {}", result.before.summary_line());
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::ClearAll {
+            dangerous,
+            confirm,
+        } => {
+            if !confirm {
+                return Err("refusing to clear-all without --confirm".into());
+            }
+            require_admin(no_elevate)?;
+            let results = log_cleanup::clear_all(dangerous);
+            let mut failed = false;
+            let mut total_files = 0u64;
+            let mut total_bytes = 0u64;
+            for (id, r) in results {
+                match r {
+                    Ok(result) => {
+                        total_files += result.removed_files;
+                        total_bytes += result.freed_bytes;
+                        println!("  OK  {id}: {}", result.summary_line());
+                    }
+                    Err(e) => {
+                        eprintln!("  FAIL {id}: {e}");
+                        failed = true;
+                    }
+                }
+            }
+            println!(
+                "\nTotal: {} item(s), {}",
+                total_files,
+                log_cleanup::format_bytes(total_bytes)
+            );
+            if failed {
+                Err("one or more clear operations failed".into())
+            } else {
+                Ok(())
+            }
+        }
+        Commands::TempList => {
+            println!("{:<18} {:<6} {}", "ID", "AVAIL", "STATUS");
+            println!("{}", "-".repeat(78));
+            for t in temp_cleanup::ALL {
+                if !t.is_available() {
+                    continue; // e.g. TMP / LocalAppData\Temp same as TEMP
+                }
+                let admin = if t.needs_admin { " [admin]" } else { "" };
+                println!("{:<18} yes    {}{admin}", t.id, t.title);
+                println!("  {}", temp_cleanup::inspect(t).summary_line());
+            }
+            println!();
+            println!("Open:  windows-diagnostics open-temp <id>");
+            println!("Clear: windows-diagnostics clear-temp <id> --confirm");
+            println!("All:   windows-diagnostics clear-temp-all --confirm");
+            Ok(())
+        }
+        Commands::OpenTemp { id } => {
+            let target = temp_cleanup::TempTarget::find(&id)
+                .ok_or_else(|| format!("unknown temp target '{id}' (see temp-list)"))?;
+            let st = temp_cleanup::inspect(target);
+            println!("{}", st.summary_line());
+            match temp_cleanup::open_location(target) {
+                Ok(msg) => {
+                    println!("{msg}");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::ClearTemp { id, confirm } => {
+            if !confirm {
+                return Err("refusing to clear-temp without --confirm".into());
+            }
+            let target = temp_cleanup::TempTarget::find(&id)
+                .ok_or_else(|| format!("unknown temp target '{id}' (see temp-list)"))?;
+            if target.needs_admin {
+                require_admin(no_elevate)?;
+            }
+            match temp_cleanup::clear(target) {
+                Ok(result) => {
+                    println!("{}", result.summary_line());
+                    println!("  before: {}", result.before.summary_line());
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Commands::ClearTempAll { confirm } => {
+            if !confirm {
+                return Err("refusing to clear-temp-all without --confirm".into());
+            }
+            // Elevate if any admin target is available
+            if temp_cleanup::ALL
+                .iter()
+                .any(|t| t.is_available() && t.needs_admin)
+            {
+                require_admin(no_elevate)?;
+            }
+            let results = temp_cleanup::clear_all();
+            let mut failed = false;
+            let mut total_files = 0u64;
+            let mut total_bytes = 0u64;
+            for (id, r) in results {
+                match r {
+                    Ok(result) => {
+                        total_files += result.removed_files;
+                        total_bytes += result.freed_bytes;
+                        println!("  OK  {id}: {}", result.summary_line());
+                    }
+                    Err(e) => {
+                        eprintln!("  FAIL {id}: {e}");
+                        failed = true;
+                    }
+                }
+            }
+            println!(
+                "\nTotal: {} item(s), {}",
+                total_files,
+                log_cleanup::format_bytes(total_bytes)
+            );
+            if failed {
+                Err("one or more temp clear operations failed".into())
+            } else {
+                Ok(())
+            }
+        }
+        Commands::Disclaimer => {
+            println!("{}", disclaimer::FULL);
+            match disclaimer::accept("cli") {
+                Ok(rec) => {
+                    println!();
+                    println!(
+                        "Recorded local acceptance at {} (user={}, computer={}, v{}).",
+                        rec.accepted_at, rec.user, rec.computer, rec.version
+                    );
+                    println!(
+                        "Stored in HKCU\\Software\\WindowsDiagnostics\\Disclaimer \
+                         (+ %APPDATA%\\WindowsDiagnostics backup). Not wiped by TEMP/log clears. Not uploaded."
+                    );
+                }
+                Err(e) => eprintln!("Could not save acceptance record: {e}"),
+            }
+            Ok(())
+        }
+        Commands::History { days } => {
+            let days = days.clamp(1, 90);
+            let rows = cleanup_history::daily_totals(days);
+            let (life_logs, life_temp) = cleanup_history::lifetime_totals();
+            println!(
+                "Lifetime freed — logs {} · temp {} · total {}",
+                cleanup_history::format_size(life_logs),
+                cleanup_history::format_size(life_temp),
+                cleanup_history::format_size(life_logs.saturating_add(life_temp))
+            );
+            println!();
+            println!("{:<12} {:>10} {:>10} {:>10}", "DATE", "LOGS", "TEMP", "TOTAL");
+            println!("{}", "-".repeat(46));
+            for d in rows {
+                println!(
+                    "{:<12} {:>10} {:>10} {:>10}",
+                    d.date,
+                    cleanup_history::format_size(d.logs_bytes),
+                    cleanup_history::format_size(d.temp_bytes),
+                    cleanup_history::format_size(d.total_bytes())
+                );
+            }
+            Ok(())
+        }
     }
 }
 
